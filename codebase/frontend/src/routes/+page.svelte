@@ -55,6 +55,12 @@
   import { observeServerId, onServerIdMismatch } from '$lib/session/serverId';
   import type { WsClient } from '$lib/ws/client';
 
+  import { tabTitleStore } from '$lib/stores/tabTitle.svelte';
+  import { formatTabTitle } from '$lib/stores/tabTitle';
+
+  const browserTitle = $derived(formatTabTitle(sessionStore.active?.name, tabTitleStore.preferences));
+  onMount(() => tabTitleStore.listen());
+
   const TOKEN_STORAGE_KEY = 'gtmux_token';
 
   /**
@@ -461,7 +467,7 @@
 </script>
 
 <svelte:head>
-  <title>gtmux</title>
+  <title>{browserTitle}</title>
 </svelte:head>
 
 <div class="app">

@@ -916,6 +916,21 @@ Single-key binding 은 모두 **Settings → Keyboard** 에서 재할당
 
 ## B. 기타 UI surface
 
+### 브라우저 탭 제목
+
+세션을 열면 탭 제목이 `gtmux - <세션 이름>`으로 표시되고, 연결된 세션이
+없으면 `gtmux`로 표시된다. 제목은 현재 활성 세션을 따라 변경된다.
+**Settings → Appearance → Browser tabs**에서 세션 이름 표시를 끄거나
+`{app}`, `{session}`을 이용해 형식을 변경할 수 있다(예: `{session} | {app}`).
+형식에는 `{session}`이 포함되어야 하며 최대 120자까지 입력할 수 있다.
+입력 중 미리보기가 표시되고, 필드를 벗어나거나 Enter를 누르면 유효한
+형식이 저장된다. **Reset format**은 기본 형식으로 되돌린다.
+
+이 설정은 현재 브라우저에 저장되고 같은 서버 origin의 다른 탭에도
+동기화된다. 각 탭에는 자기 세션 이름이 표시된다. 서버 TOML 설정이나
+세션 내보내기에는 포함되지 않는다. 브라우저 저장소에 쓰지 못하면 오류를
+표시하고 이전 설정을 유지한다.
+
 ### Titlebar (44px, 상단)
 
 - 좌: Session menu (kebab `⋮`) + brand mark + "gtmux".

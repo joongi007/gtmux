@@ -962,6 +962,22 @@ All single-key bindings are reassignable in **Settings → Keyboard**.
 
 ## B. Other UI surfaces
 
+### Browser tab titles
+
+Tabs show `gtmux - <session name>` while a session is open, and `gtmux`
+when no session is attached. The title follows the active session.
+In **Settings → Appearance → Browser tabs**, turn session names off or
+customize the format using `{app}` and `{session}` (for example,
+`{session} | {app}`). The format must include `{session}` and is limited
+to 120 characters. A preview updates as you type; valid formats save on
+leaving the field or pressing Enter. **Reset format** restores the default.
+
+These preferences are saved in this browser and synchronized across tabs
+on the same server origin; each tab still displays its own session name.
+They do not change server TOML settings or session exports. If browser
+storage rejects a write, an error is shown and the previous preference
+remains active.
+
 ### Titlebar (44 px, top)
 
 - Left: Session menu (kebab `⋮`) + brand mark + "gtmux".

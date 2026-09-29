@@ -56,6 +56,38 @@
   import { sessionStore } from '$lib/stores/sessionStore.svelte';
   import { shutdownDialog } from '$lib/stores/shutdownDialog.svelte';
 
+  import { tabTitleStore } from '$lib/stores/tabTitle.svelte';
+  import {
+    DEFAULT_TAB_TITLE_PREFERENCES,
+    TAB_TITLE_FORMAT_MAX_LENGTH,
+    formatTabTitle,
+    validateTabTitleFormat,
+  } from '$lib/stores/tabTitle';
+
+  let titleFormatDraft = $state(tabTitleStore.preferences.format);
+  $effect(() => { titleFormatDraft = tabTitleStore.preferences.format; });
+  const titleFormatError = $derived(validateTabTitleFormat(titleFormatDraft));
+  const titlePreview = $derived(formatTabTitle(sessionStore.active?.name ?? 'my-session', {
+    enabled: tabTitleStore.preferences.enabled,
+    format: titleFormatDraft,
+  }));
+
+  function setTabTitleEnabled(input: HTMLInputElement): void {
+    if (!tabTitleStore.update({ enabled: input.checked })) {
+      input.checked = tabTitleStore.preferences.enabled;
+    }
+  }
+
+  function saveTitleFormat(): void {
+    if (titleFormatError === null) tabTitleStore.update({ format: titleFormatDraft });
+  }
+
+  function resetTitleFormat(): void {
+    if (tabTitleStore.update({ format: DEFAULT_TAB_TITLE_PREFERENCES.format })) {
+      titleFormatDraft = DEFAULT_TAB_TITLE_PREFERENCES.format;
+    }
+  }
+
   const open = $derived(settingsDialog.open);
   const section = $derived(settingsDialog.section);
   const activeSessionName = $derived(sessionStore.active?.name ?? 'current session');
@@ -761,6 +793,58 @@
                 </div>
               </div>
             </div>
+            <div class="sgroup-head">Browser tabs</div>
+            <label class="srow">
+              <div>
+                <div class="lbl">Show session name in tab title</div>
+                <div class="dsc">Saved in this browser and shared with tabs on this server.</div>
+              </div>
+              <div class="ctl">
+                <input
+                  class="native-toggle"
+                  type="checkbox"
+                  checked={tabTitleStore.preferences.enabled}
+                  onchange={(e) => setTabTitleEnabled(e.currentTarget)}
+                />
+              </div>
+            </label>
+            <div class="srow title-format-row">
+              <div>
+                <label class="lbl" for="tab-title-format">Title format</label>
+                <div class="dsc" id="tab-title-format-help">
+                  Use <code>{'{app}'}</code> and <code>{'{session}'}</code>.
+                  Saves when you leave the field or press Enter.
+                </div>
+              </div>
+              <div class="title-format-controls">
+                <input
+                  id="tab-title-format"
+                  class="pw-input"
+                  type="text"
+                  bind:value={titleFormatDraft}
+                  maxlength={TAB_TITLE_FORMAT_MAX_LENGTH}
+                  disabled={!tabTitleStore.preferences.enabled}
+                  spellcheck="false"
+                  aria-invalid={titleFormatError !== null}
+                  aria-describedby="tab-title-format-help tab-title-format-feedback"
+                  onchange={saveTitleFormat}
+                  onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); saveTitleFormat(); } }}
+                />
+                <button type="button" class="btn" disabled={!tabTitleStore.preferences.enabled} onclick={resetTitleFormat}>
+                  Reset format
+                </button>
+              </div>
+            </div>
+            <div id="tab-title-format-feedback" class="dsc" aria-live="polite">
+              {#if tabTitleStore.preferences.enabled && titleFormatError !== null}
+                <span class="pw-hint-error">{titleFormatError}</span>
+              {:else}
+                Preview: <span class="title-preview">{titlePreview}</span>
+              {/if}
+            </div>
+            {#if tabTitleStore.saveError !== null}
+              <p class="pw-error" role="alert">{tabTitleStore.saveError}</p>
+            {/if}
           {:else if section === 'shortcuts'}
             <h3 class="section-head">Keyboard</h3>
             <p class="section-hint">
@@ -1470,6 +1554,14 @@
     padding: 14px 0;
     border-bottom: 1px solid var(--color-border);
   }
+
+  .title-format-row { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+
+  .title-format-controls { display: flex; flex-wrap: wrap; gap: 8px; }
+
+  .title-format-controls .pw-input { flex: 1 1 220px; min-width: 0; }
+
+  .title-preview { overflow-wrap: anywhere; }
 
   .srow:last-child {
     border-bottom: 0;
