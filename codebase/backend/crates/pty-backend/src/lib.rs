@@ -45,8 +45,11 @@ use dashmap::DashMap;
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use activity::ActivityTracker;
 use tokio::sync::{broadcast, mpsc};
 use tracing::{debug, info, warn};
+
+pub mod activity;
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Tunables — calibrated against POC Gate #5 + ADR-0013 D3 / ADR-0014 O1.
@@ -287,6 +290,7 @@ struct PaneHandle {
     /// bytes the PTY emitted so a WS attach that arrives after the
     /// first burst still sees the user-visible terminal state.
     ring: Arc<StdMutex<VecDeque<u8>>>,
+    activity: Arc<StdMutex<ActivityTracker>>,
     /// Backpressure observability — incremented by the reader thread
     /// every time it sees a broadcast `send` error (= no subscribers
     /// OR cap overflow). Read-only externally.
@@ -772,12 +776,41 @@ impl PtyBackend {
             .panes
             .get(&id)
             .ok_or(PtyBackendError::PaneNotFound(id))?;
+        // Serialize input-state reset with output observation so an immediate
+        // response cannot be overwritten by a late input notification.
+        let mut tracker = handle.activity.lock().ok();
+        let input = !bytes.is_empty();
         handle
             .in_tx
             .as_ref()
             .ok_or(PtyBackendError::ChannelClosed(id))?
             .send(bytes)
-            .map_err(|_| PtyBackendError::ChannelClosed(id))
+            .map_err(|_| PtyBackendError::ChannelClosed(id))?;
+        if input {
+            if let Some(ref mut tracker) = tracker {
+                tracker.input(b"input");
+            }
+        }
+        Ok(())
+    }
+
+    /// Snapshot metadata without subscribing to output or copying the ring.
+    pub fn activity(&self, id: PaneId) -> Option<activity::ActivitySnapshot> {
+        let handle = self.inner.panes.get(&id)?;
+        let mut tracker = handle.activity.lock().ok()?;
+        Some(tracker.snapshot(std::time::Instant::now()))
+    }
+
+    /// Explicit agent hook report, scoped to a live terminal.
+    pub fn report_activity(&self, id: PaneId, state: activity::ActivityState) -> bool {
+        let Some(handle) = self.inner.panes.get(&id) else {
+            return false;
+        };
+        let Ok(mut tracker) = handle.activity.lock() else {
+            return false;
+        };
+        tracker.report(state);
+        true
     }
 
     /// Subscribe to the Pane's output broadcast and obtain the current
@@ -956,6 +989,7 @@ fn spawn_inner(
     let (out_tx, _) = broadcast::channel::<Bytes>(BROADCAST_CAPACITY);
     let (in_tx, mut in_rx) = mpsc::unbounded_channel::<Vec<u8>>();
     let ring = Arc::new(StdMutex::new(VecDeque::with_capacity(RING_CAPACITY)));
+    let activity = Arc::new(StdMutex::new(ActivityTracker::default()));
     let stall = Arc::new(AtomicU64::new(0));
 
     let id = PaneId(inner.next_id.fetch_add(1, Ordering::Relaxed));
@@ -963,6 +997,7 @@ fn spawn_inner(
     // ─── reader thread ──────────────────────────────────────────────
     let out_tx_reader = out_tx.clone();
     let ring_reader = ring.clone();
+    let activity_reader = activity.clone();
     let stall_reader = stall.clone();
     let reader_join = std::thread::Builder::new()
         .name(format!("pty-reader-{}", id.0))
@@ -979,6 +1014,9 @@ fn spawn_inner(
                         // so a late attach that arrives between the two
                         // operations still sees the bytes.
                         PaneHandle::ring_append(&ring_reader, &buf[..n]);
+                        if let Ok(mut tracker) = activity_reader.lock() {
+                            tracker.output(&buf[..n], std::time::Instant::now());
+                        }
                         let chunk = Bytes::copy_from_slice(&buf[..n]);
                         if out_tx_reader.send(chunk).is_err() {
                             // No subscribers OR every subscriber is
@@ -1091,6 +1129,7 @@ fn spawn_inner(
         master,
         child,
         ring,
+        activity,
         stall_count: stall,
         reader_join: Some(reader_join),
         writer_join: Some(writer_join),

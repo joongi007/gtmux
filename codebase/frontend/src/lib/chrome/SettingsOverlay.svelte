@@ -56,6 +56,8 @@
   import { sessionStore } from '$lib/stores/sessionStore.svelte';
   import { shutdownDialog } from '$lib/stores/shutdownDialog.svelte';
 
+  import SettingsSwitch from './SettingsSwitch.svelte';
+  import ActivitySettings from './ActivitySettings.svelte';
   import { tabTitleStore } from '$lib/stores/tabTitle.svelte';
   import {
     DEFAULT_TAB_TITLE_PREFERENCES,
@@ -800,9 +802,7 @@
                 <div class="dsc">Saved in this browser and shared with tabs on this server.</div>
               </div>
               <div class="ctl">
-                <input
-                  class="native-toggle"
-                  type="checkbox"
+                <SettingsSwitch
                   checked={tabTitleStore.preferences.enabled}
                   onchange={(e) => setTabTitleEnabled(e.currentTarget)}
                 />
@@ -845,6 +845,7 @@
             {#if tabTitleStore.saveError !== null}
               <p class="pw-error" role="alert">{tabTitleStore.saveError}</p>
             {/if}
+            <ActivitySettings />
           {:else if section === 'shortcuts'}
             <h3 class="section-head">Keyboard</h3>
             <p class="section-hint">
@@ -951,9 +952,7 @@
                 <div class="dsc">Include dot-prefixed files in workspace file pickers.</div>
               </div>
               <div class="ctl">
-                <input
-                  class="native-toggle"
-                  type="checkbox"
+                <SettingsSwitch
                   checked={settingsStore.behavior.picker_show_hidden}
                   onchange={(e) => void setBehaviorFlag('picker_show_hidden', e.currentTarget as HTMLInputElement)}
                 />
@@ -1135,9 +1134,7 @@
                 <div class="dsc">Skip the confirm dialog and SIGTERM the terminal whenever a panel is closed.</div>
               </div>
               <div class="ctl">
-                <input
-                  class="native-toggle"
-                  type="checkbox"
+                <SettingsSwitch
                   checked={settingsStore.behavior.auto_kill_terminal_on_panel_close}
                   onchange={(e) => void setBehaviorFlag('auto_kill_terminal_on_panel_close', e.currentTarget as HTMLInputElement)}
                 />
@@ -1150,9 +1147,7 @@
                 <div class="dsc">After switching sessions, reload the page to reset caches, WS state, and attach state.</div>
               </div>
               <div class="ctl">
-                <input
-                  class="native-toggle"
-                  type="checkbox"
+                <SettingsSwitch
                   checked={settingsStore.behavior.reload_on_session_switch}
                   onchange={(e) => void setBehaviorFlag('reload_on_session_switch', e.currentTarget as HTMLInputElement)}
                 />
@@ -1176,9 +1171,7 @@
                 {/if}
               </div>
               <div class="ctl">
-                <input
-                  class="native-toggle"
-                  type="checkbox"
+                <SettingsSwitch
                   checked={settingsStore.behavior.osc52_clipboard_write_enabled}
                   onchange={(e) => void setBehaviorFlag('osc52_clipboard_write_enabled', e.currentTarget as HTMLInputElement)}
                 />
@@ -1691,50 +1684,6 @@
     width: 32px;
     min-width: 32px;
     padding: 0;
-  }
-
-  .native-toggle {
-    box-sizing: border-box;
-    width: 28px;
-    height: 16px;
-    margin: 0;
-    display: block;
-    position: relative;
-    flex: 0 0 28px;
-    border: 0;
-    border-radius: var(--radius-pill);
-    background: var(--color-border-strong);
-    cursor: pointer;
-    appearance: none;
-    -webkit-appearance: none;
-    transition: background var(--motion-fast) var(--motion-easing);
-  }
-
-  .native-toggle::after {
-    content: '';
-    position: absolute;
-    top: 2px;
-    left: 2px;
-    width: 12px;
-    height: 12px;
-    border-radius: 50%;
-    background: var(--color-surface);
-    box-shadow: 0 1px 2px color-mix(in srgb, black 24%, transparent);
-    transition: left var(--motion-fast) var(--motion-easing);
-  }
-
-  .native-toggle:checked {
-    background: var(--color-accent);
-  }
-
-  .native-toggle:checked::after {
-    left: 14px;
-    background: var(--color-accent-fg);
-  }
-
-  .native-toggle:focus-visible {
-    outline: 2px solid var(--color-info);
-    outline-offset: 2px;
   }
 
   .slider {

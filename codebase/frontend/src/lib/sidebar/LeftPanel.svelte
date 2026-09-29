@@ -17,17 +17,27 @@
    *     expands the panel AND switches to that tab (chromeStore.setLeftPanelTab).
    */
 
-  import { onDestroy, onMount } from 'svelte';
+  import { onDestroy, onMount, untrack } from 'svelte';
   import { chromeStore, type LeftPanelTab } from '$lib/stores/chrome.svelte';
   import { measurePanelContentFitWidth } from '$lib/stores/panelWidthToggle';
   import { sessionStore } from '$lib/stores/sessionStore.svelte';
   import { registerLeftPanelSearchController } from './leftPanelSearchController';
   import LayerTreeView from './LayerTreeView.svelte';
   import TerminalListView from './TerminalListView.svelte';
+  import ActivityListView from './ActivityListView.svelte';
+  import { terminalActivity } from '$lib/stores/terminalActivity.svelte';
   import FileTreeView from './FileTreeView.svelte';
   import PanelFoldButton from '$lib/chrome/PanelFoldButton.svelte';
 
   const collapsed = $derived(chromeStore.state.sidebarCollapsed);
+  const showActivity = $derived(terminalActivity.preferences.enabled && terminalActivity.preferences.list);
+  $effect(() => {
+    if (!showActivity && chromeStore.state.leftPanelTab === 'activity') chromeStore.setLeftPanelTab('terminals');
+  });
+  $effect(() => {
+    const visible = showActivity;
+    untrack(() => chromeStore.setActivityPanelVisible(visible));
+  });
   const activeTab = $derived(chromeStore.state.leftPanelTab);
   const panelWidth = $derived(chromeStore.state.leftPanelWidth);
   // No active session 시 tabs + body 는 의미 없음. fold/expand 만 유지해
@@ -45,12 +55,15 @@
     layers: '',
     terminals: '',
     files: '',
+    activity: '',
   });
   let searchInputEl = $state<HTMLInputElement | null>(null);
 
   // Placeholder copy follows the active tab so the single input reads naturally.
   const searchPlaceholder = $derived(
-    activeTab === 'files'
+    activeTab === 'activity'
+      ? 'Search activity…'
+      : activeTab === 'files'
       ? 'Search files…'
       : activeTab === 'layers'
         ? 'Search layers…'
@@ -191,6 +204,11 @@
         <path d="M3 6.5A2.5 2.5 0 0 1 5.5 4H10l2 2h6.5A2.5 2.5 0 0 1 21 8.5v8A2.5 2.5 0 0 1 18.5 19h-13A2.5 2.5 0 0 1 3 16.5v-10z"/>
       </svg>
     </button>
+    {#if showActivity}
+      <button type="button" class="rail-btn" class:active={activeTab === 'activity'}
+        title="Activity" aria-label="Open Activity tab" disabled={noActiveSession}
+        onclick={() => expandAndSelect('activity')}>◉</button>
+    {/if}
   </aside>
 {:else}
   <aside
@@ -237,6 +255,11 @@
           title={noActiveSession ? 'Connect a session to browse files' : ''}
           onclick={() => selectTab('files')}
         >Files</button>
+        {#if showActivity}
+          <button type="button" role="tab" class="panel-tab" class:active={activeTab === 'activity'}
+            aria-selected={activeTab === 'activity'} disabled={noActiveSession}
+            onclick={() => selectTab('activity')}>Activity</button>
+        {/if}
       </div>
       <span class="head-spacer"></span>
     </header>
@@ -246,6 +269,8 @@
         <LayerTreeView query={searchByTab.layers} />
       {:else if activeTab === 'terminals'}
         <TerminalListView query={searchByTab.terminals} />
+      {:else if activeTab === 'activity'}
+        <ActivityListView query={searchByTab.activity} />
       {:else}
         <FileTreeView query={searchByTab.files} />
       {/if}
@@ -379,7 +404,9 @@
     align-items: stretch;
     flex: 1 1 auto;
     min-width: 0;
-    gap: var(--space-12);
+    gap: var(--space-8);
+    overflow-x: auto;
+    scrollbar-width: thin;
   }
 
   .panel-tab {

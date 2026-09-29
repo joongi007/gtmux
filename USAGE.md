@@ -962,6 +962,79 @@ All single-key bindings are reassignable in **Settings → Keyboard**.
 
 ## B. Other UI surfaces
 
+### Terminal activity
+
+Enable **Settings → Appearance → Terminal activity** (off by default).
+The **Activity** tab in the left panel lists live terminals in the current
+session. Completion, input-needed and unread-output indicators each have
+an independent switch, as do the list and browser-tab indicators. Turning
+the master switch off hides both surfaces and stops browser polling.
+The sidebar defaults to 340px when Activity is visible (268px otherwise).
+Dragging its edge saves separate widths for the two configurations; toggling
+Activity restores the corresponding width, including after reload.
+
+**Activity title format** controls the wrapper with `{title}` (the existing
+browser title) and `{activity}` (pending states). Completion, input-needed
+and unread labels each accept `{count}`, or a static symbol such as `✓`.
+For example, `{title} | {activity}` with completion label `✓ {count}` shows
+`gtmux - work | ✓ 2`. Preview, Enter/blur saving and reset are provided.
+Invalid formats show an error and keep the last saved value. No pending
+activity means the ordinary browser title is used without the wrapper.
+
+Preferences are saved in this browser and shared across same-origin tabs;
+read acknowledgements are kept separately in each tab's session storage.
+
+- **Active / Output quiet**: printable output arrived / output has paused.
+  Silence alone never means that an agent completed its task.
+- **Completed / Needs input**: an explicit report; shell command completion
+  can also come from OSC 133 C/D shell integration markers.
+- **(estimated)**: limited prompt recognition, such as `❯`, `›`, `(y/n)`
+  or “press enter to continue”. Full-screen redraws, custom prompts and
+  localized tools may produce missing or incorrect estimates. Shell command
+  completion is distinct from an agent turn completing inside that command.
+- **Unread output**: new printable output since acknowledgement. Focusing
+  a visible terminal, clicking its checkmark or choosing **Mark listed
+  terminals read** acknowledges output and pending notices. This records
+  focus/acknowledgement, not whether you actually read every line of scrollback.
+
+The first observation of a new terminal is the baseline: existing output
+is not announced as unread. Server restarts and terminal respawns get new
+baselines. The browser polls every two seconds while enabled and connected
+to a session; background-tab throttling can delay updates. Each browser tab
+counts only terminals belonging to its session, e.g. `[1 done] gtmux - work`.
+If multiple categories apply, input-needed takes priority over completion,
+then unread, so each terminal is counted once. Current state stays in the
+list after acknowledgement; only pending notices clear. On API errors the
+list shows an error and retries; browser badges are suppressed until recovery.
+The server tracks bounded activity metadata even when the UI is disabled.
+
+For reliable agent lifecycle integration, have the tool's hook call these
+commands from the environment of its gtmux terminal (with `gtmux` on PATH):
+
+```sh
+gtmux terminal report working
+gtmux terminal report needs_input
+gtmux terminal report completed
+```
+
+`GTMUX_TERMINAL_ID` selects the terminal automatically. Outside that terminal,
+pass `--target <terminal-uuid> --instance <instance-name>`. Reports use the
+existing authenticated connection and never send input to the terminal.
+Explicit states persist until another report, terminal input or shell marker;
+report `working` when a new turn begins. `unknown` is also accepted. These
+commands provide the integration interface; agent-specific hooks are **not**
+automatically installed. Use the CLI and backend built from the same revision.
+
+For custom clients, authenticated `GET /api/terminals/activity` returns
+`{server_id, terminals: [{id, pane_id, activity: {state, source, output_seq,
+state_seq}}]}`. `source` is `output`, `heuristic`, `shell` or `report`.
+Authenticated `POST /api/terminals/<uuid>/activity` accepts
+`{"state":"working|completed|needs_input|unknown"}` (choose one value),
+returning 204; a missing terminal returns 404, `quiet` returns 400, and an
+unknown state returns 422. A backend without a PTY hub returns 503.
+Counters are process-local acknowledgement tokens, not byte counts or history.
+No terminal output content is included in these responses.
+
 ### Browser tab titles
 
 Tabs show `gtmux - <session name>` while a session is open, and `gtmux`

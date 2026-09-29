@@ -916,6 +916,74 @@ Single-key binding 은 모두 **Settings → Keyboard** 에서 재할당
 
 ## B. 기타 UI surface
 
+### 터미널 활동 상태
+
+**Settings → Appearance → Terminal activity**에서 켤 수 있다(기본 꺼짐).
+왼쪽 **Activity** 탭에는 현재 세션의 살아 있는 터미널이 표시된다.
+완료·입력 대기·읽지 않은 출력은 각각 설정할 수 있고, 목록과 브라우저 탭
+표시도 따로 켜고 끌 수 있다. 전체 기능을 끄면 두 표시가 숨겨지고 브라우저
+폴링도 중단된다. 설정은 같은 출처의 브라우저 탭끼리 공유하며, 읽음 확인은
+탭별 sessionStorage에 별도로 보관한다.
+
+Activity가 보이면 사이드바 기본 너비는 340px, 숨기면 268px이다.
+경계를 드래그한 사용자 너비는 두 상태별로 따로 저장하며, 기능을 켜고 끄거나
+새로고침해도 해당 상태의 너비로 복원된다.
+
+**Activity title format**에서 `{title}`(기존 탭 제목), `{activity}`(대기 알림)로
+전체 형식을 지정한다. 완료·입력 대기·미확인 문구는 각각 `{count}`를 쓰거나
+`✓` 같은 고정 기호로 지정할 수 있다. 예를 들어 `{title} | {activity}`와
+완료 문구 `✓ {count}`는 `gtmux - work | ✓ 2`로 표시된다.
+미리보기·Enter/포커스 이동 시 저장·기본값 복원을 제공한다. 잘못된 형식은
+오류를 표시하고 이전 저장값을 유지한다. 대기 알림이 없으면 기존 탭 제목만 표시한다.
+
+
+- **Active / Output quiet**: 출력 발생 / 출력이 잠잠해짐. 출력이 멈췄다는
+  이유만으로 에이전트 작업 완료라고 판단하지 않는다.
+- **Completed / Needs input**: 명시적 상태 보고. 셸 명령 완료는
+  OSC 133 C/D 셸 통합 마커로도 감지한다.
+- **(estimated)**: `❯`, `›`, `(y/n)`, “press enter to continue” 등 일부
+  프롬프트로 추정한 상태다. 전체 화면 재출력·사용자 프롬프트·다국어 도구에
+  따라 오탐이나 누락이 가능하다. 셸 명령 완료와 실행 중인 에이전트의 한 턴
+  완료는 서로 다르다.
+- **Unread output**: 마지막 확인 이후 새 출력. 보이는 터미널에 포커스를
+  주거나 행의 체크 버튼 또는 **Mark listed terminals read**를 누르면 출력과
+  대기 중인 알림을 확인 처리한다. 스크롤백을 실제로 전부 읽었는지는 판단하지 않는다.
+
+새 터미널의 첫 관측값은 기준점이며 기존 출력을 미확인 알림으로 띄우지 않는다.
+서버 재시작·터미널 재생성 시에도 기준점이 새로 만들어진다. 활성화하고 세션에
+연결된 동안 2초 간격으로 조회하며 백그라운드 탭에서는 브라우저 제한으로 지연될 수
+있다. 탭 제목은 해당 세션 터미널만 집계한다(예: `[1 done] gtmux - work`).
+중복 상태는 입력 대기 → 완료 → 미확인 출력 순으로 한 터미널당 한 번 집계한다.
+읽음 처리 후에도 목록의 현재 상태는 유지되고 대기 알림만 사라진다.
+API 오류 시 목록에 오류와 재시도를 표시하며 복구 전까지 탭 알림을 숨긴다.
+UI를 꺼도 서버의 용량 제한된 활동 메타데이터 수집은 유지된다.
+
+정확한 에이전트 상태를 연결하려면 해당 도구의 hook에서 다음 명령을 호출한다.
+에이전트가 실행되는 gtmux 터미널의 환경을 이어받고 `gtmux`가 PATH에 있어야 한다.
+
+```sh
+gtmux terminal report working
+gtmux terminal report needs_input
+gtmux terminal report completed
+```
+
+터미널은 `GTMUX_TERMINAL_ID` 환경 변수로 자동 선택한다. 바깥에서 호출할 때는
+`--target <terminal-uuid> --instance <instance-name>`을 지정한다.
+기존 인증 연결을 사용하며 터미널에 입력을 전송하지 않는다. 명시적 상태는 다음 보고,
+터미널 입력 또는 셸 마커까지 유지되므로 새 턴 시작에는 `working`을 보고한다.
+`unknown`도 지원한다. 연동 인터페이스를 제공하는 기능이며 도구별 hook을 자동
+설치하지는 않는다. CLI와 백엔드는 같은 리비전으로 빌드해야 한다.
+
+커스텀 클라이언트는 인증된 `GET /api/terminals/activity`로
+`{server_id, terminals: [{id, pane_id, activity: {state, source, output_seq,
+state_seq}}]}`를 받는다. `source`는 `output`, `heuristic`, `shell`, `report`다.
+인증된 `POST /api/terminals/<uuid>/activity`에
+`{"state":"completed"}`를 보내면 204를 반환한다.
+`working`, `needs_input`, `unknown`도 허용하며 없는 터미널은 404,
+`quiet`는 400, 알 수 없는 상태는 422, PTY hub가 없는 서버는 503이다.
+카운터는 프로세스 내 확인용 값이며 바이트 수나 영구 이력이 아니다.
+응답에 터미널 출력 원문은 포함되지 않는다.
+
 ### 브라우저 탭 제목
 
 세션을 열면 탭 제목이 `gtmux - <세션 이름>`으로 표시되고, 연결된 세션이

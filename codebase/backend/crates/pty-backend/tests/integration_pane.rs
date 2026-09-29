@@ -473,3 +473,23 @@ async fn drop_backend_terminates_all_panes() {
     // didn't panic + the test exits cleanly.
     assert_eq!(pids.len(), 3);
 }
+
+#[tokio::test]
+async fn activity_is_observed_without_output_subscribers() {
+    use gtmux_pty_backend::activity::{ActivitySource, ActivityState};
+    let backend = PtyBackend::new();
+    let pane = backend.spawn(shell_spec()).unwrap();
+    backend.send_input(pane, b"printf 'activity-marker\n'\n".to_vec()).unwrap();
+    timeout(Duration::from_secs(5), async {
+        while backend.activity(pane).unwrap().output_seq == 0 {
+            sleep(Duration::from_millis(20)).await;
+        }
+    }).await.unwrap();
+    assert!(backend.report_activity(pane, ActivityState::NeedsInput));
+    let snapshot = backend.activity(pane).unwrap();
+    assert_eq!(snapshot.state, ActivityState::NeedsInput);
+    assert_eq!(snapshot.source, ActivitySource::Report);
+    backend.kill(pane).unwrap();
+    assert!(backend.activity(pane).is_none());
+    assert!(!backend.report_activity(pane, ActivityState::Completed));
+}

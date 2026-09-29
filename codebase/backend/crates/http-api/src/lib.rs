@@ -866,6 +866,8 @@ pub fn router_with_state_and_spa(state: AppState, frontend_dist: Option<&Path>) 
             axum::routing::delete(sessions::delete_item_handler),
         )
         .route("/api/terminals", get(terminals::list_handler))
+        .route("/api/terminals/activity", get(terminals::activity_handler))
+        .route("/api/terminals/{id}/activity", axum::routing::post(terminals::report_activity_handler))
         .route(
             "/api/terminals/{id}",
             axum::routing::patch(terminals::patch_handler),
@@ -5785,6 +5787,62 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    #[tokio::test]
+    async fn activity_routes_require_authentication() {
+        let (app, _) = make_app();
+        for (method, uri) in [(Method::GET, "/api/terminals/activity"),
+            (Method::POST, "/api/terminals/missing/activity")] {
+            let response = app.clone().oneshot(HttpRequest::builder()
+                .method(method).uri(uri).header(header::HOST, TEST_HOST)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"state":"completed"}"#)).unwrap()).await.unwrap();
+            assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        }
+    }
+
+    #[tokio::test]
+    async fn activity_reports_and_snapshot_track_live_terminals() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let (state, token, _) = make_state_with_workspace_and_hub(&dir);
+        let uuid = "11111111-2222-4333-8444-555555555aaa";
+        let pane = state.spawn_terminal_with_uuid(uuid.into(), None, None).await.unwrap();
+        let app = router_with_state(state.clone());
+        for (id, body, expected) in [
+            (uuid, r#"{"state":"completed"}"#, StatusCode::NO_CONTENT),
+            ("missing", r#"{"state":"completed"}"#, StatusCode::NOT_FOUND),
+            (uuid, r#"{"state":"quiet"}"#, StatusCode::BAD_REQUEST),
+            (uuid, r#"{"state":"invalid"}"#, StatusCode::UNPROCESSABLE_ENTITY),
+        ] {
+            let response = app.clone().oneshot(HttpRequest::builder().method(Method::POST)
+                .uri(format!("/api/terminals/{id}/activity"))
+                .header(header::HOST, TEST_HOST).header(header::AUTHORIZATION, bearer(&token))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(body)).unwrap()).await.unwrap();
+            assert_eq!(response.status(), expected);
+        }
+        let response = app.oneshot(HttpRequest::builder().uri("/api/terminals/activity")
+            .header(header::HOST, TEST_HOST).header(header::AUTHORIZATION, bearer(&token))
+            .body(Body::empty()).unwrap()).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body: Value = serde_json::from_slice(&to_bytes(response.into_body(), 8192).await.unwrap()).unwrap();
+        assert_eq!(body["server_id"], state.server_id.as_ref());
+        let rows = body["terminals"].as_array().unwrap();
+        let row = rows.iter().find(|row| row["id"] == uuid).unwrap();
+        assert_eq!(row["pane_id"], pane.0);
+        assert_eq!(row["activity"]["state"], "completed");
+        assert_eq!(row["activity"]["source"], "report");
+        state.hub.as_ref().unwrap().backend().kill(pane).unwrap();
+    }
+
+    #[tokio::test]
+    async fn activity_snapshot_requires_hub() {
+        let (app, token) = make_app();
+        let response = app.oneshot(HttpRequest::builder().uri("/api/terminals/activity")
+            .header(header::HOST, TEST_HOST).header(header::AUTHORIZATION, bearer(&token))
+            .body(Body::empty()).unwrap()).await.unwrap();
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
     }
 
     // ── ADR-0054: terminal output read + input send ──
