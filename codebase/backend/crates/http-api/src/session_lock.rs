@@ -487,11 +487,17 @@ mod tests {
         let d = dir();
         let server_id: Arc<str> = fresh_server_id().into();
         let mut guard = acquire(&locks(&d), "eps", server_id, "conn-1").unwrap();
-        let before = read_lease_body(guard.path()).unwrap().lease_until_unix;
-        std::thread::sleep(std::time::Duration::from_millis(1100));
+        // Seed an expired diagnostic lease; avoid depending on wall-clock
+        // advancement (WSL clock corrections can move it backwards).
+        let mut expired = read_lease_body(guard.path()).unwrap();
+        expired.lease_until_unix = 0;
+        write_lease_body(guard.file.as_mut().unwrap(), &expired).unwrap();
+        guard.expire_for_test();
+        assert!(guard.is_expired());
         guard.refresh_lease("conn-2").unwrap();
         let after = read_lease_body(guard.path()).unwrap();
-        assert!(after.lease_until_unix > before, "lease must extend");
+        assert!(after.lease_until_unix > 0, "lease must be renewed");
+        assert!(!guard.is_expired());
         assert_eq!(after.ws_conn_id, "conn-2");
     }
 

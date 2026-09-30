@@ -29,14 +29,14 @@ pub struct DisconnectEvent { pub owner: String, pub generation: u64 }
 #[derive(Default)]
 struct OwnerConnections { generation: u64, connections: std::collections::HashSet<String> }
 
-pub struct ConnectionLease { hub: Hub, owner: String, id: String, generation: u64 }
+pub struct ConnectionLease { hub: Hub, owner: String, id: String }
 impl Drop for ConnectionLease {
     fn drop(&mut self) {
         let event = {
             let mut owners = self.hub.owner_connections.lock().unwrap_or_else(|e| e.into_inner());
             let Some(owner) = owners.get_mut(&self.owner) else { return; };
             owner.connections.remove(&self.id);
-            owner.connections.is_empty().then(|| DisconnectEvent { owner: self.owner.clone(), generation: self.generation })
+            owner.connections.is_empty().then(|| DisconnectEvent { owner: self.owner.clone(), generation: owner.generation })
         };
         if let (Some(event), Some(sink)) = (event, self.hub.disconnect_sink()) { let _ = sink.send(event); }
     }
@@ -609,7 +609,7 @@ impl Hub {
         let entry = owners.entry(owner.to_owned()).or_default();
         entry.generation += 1;
         entry.connections.insert(id.to_owned());
-        ConnectionLease { hub: self.clone(), owner: owner.to_owned(), id: id.to_owned(), generation: entry.generation }
+        ConnectionLease { hub: self.clone(), owner: owner.to_owned(), id: id.to_owned() }
     }
 
     pub fn has_owner_connection(&self, owner: &str) -> bool {
@@ -617,9 +617,16 @@ impl Hub {
             .is_some_and(|entry| !entry.connections.is_empty())
     }
 
-    pub fn is_disconnected_generation(&self, owner: &str, generation: u64) -> bool {
-        self.owner_connections.lock().unwrap_or_else(|e| e.into_inner()).get(owner)
-            .is_some_and(|entry| entry.connections.is_empty() && entry.generation == generation)
+    /// Run a synchronous cleanup while excluding connection registration.
+    /// Callers must acquire their async attach maps before entering this fence;
+    /// the callback must not call connection-registry methods or await.
+    pub fn with_disconnected_owner(&self, owner: &str, generation: Option<u64>, cleanup: impl FnOnce()) {
+        let owners = self.owner_connections.lock().unwrap_or_else(|e| e.into_inner());
+        let eligible = match owners.get(owner) {
+            Some(entry) => entry.connections.is_empty() && generation.is_none_or(|g| g == entry.generation),
+            None => generation.is_none(),
+        };
+        if eligible { cleanup(); }
     }
 
     pub fn set_session_for_owner(&self, owner_key: &str, session_name: &str) {

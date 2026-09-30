@@ -411,14 +411,17 @@ impl AppState {
     pub async fn reap_abandoned_attaches(&self) {
         let mut owners = self.session_locks_by_owner.lock().await;
         let mut holders = self.session_locks.lock().await;
-        let expired: Vec<_> = owners.iter().filter(|(owner, name)| {
+        let expired: Vec<_> = owners.iter().filter(|(_, name)| {
             holders.get(*name).is_some_and(|guard| guard.is_expired())
-                && !self.hub.as_ref().is_some_and(|hub| hub.has_owner_connection(owner))
         }).map(|(owner, name)| (owner.clone(), name.clone())).collect();
         for (owner, name) in expired {
-            owners.remove(&owner);
-            holders.remove(&name);
-            if let Some(hub) = &self.hub { hub.clear_session_for_owner(&owner); }
+            let mut cleanup = || {
+                owners.remove(&owner);
+                holders.remove(&name);
+                if let Some(hub) = &self.hub { hub.clear_session_for_owner(&owner); }
+            };
+            if let Some(hub) = &self.hub { hub.with_disconnected_owner(&owner, None, cleanup); }
+            else { cleanup(); }
         }
     }
 
@@ -469,26 +472,18 @@ impl AppState {
         // anywhere two maps are touched together, so a same-owner attach
         // racing with a disconnect cannot deadlock.
         let mut by_owner = self.session_locks_by_owner.lock().await;
-        if let Some(generation) = generation {
-            if !self.hub.as_ref().is_some_and(|hub| hub.is_disconnected_generation(owner_key, generation)) { return; }
-        }
-        let Some(name) = by_owner.remove(owner_key) else {
-            return;
-        };
         let mut holders = self.session_locks.lock().await;
-        if let Some(mut guard) = holders.remove(&name) {
-            tracing::info!(
-                session = %name,
-                "session_lock: auto-released on WS disconnect"
-            );
-            guard.release();
-        }
-        // Stage 5-A: mirror the auto-release into the hub's owner ↔
-        // session table so a fresh WS reconnect doesn't see this Webpage
-        // as still session-attached.
-        if let Some(hub) = self.hub.as_ref() {
-            hub.clear_session_for_owner(owner_key);
-        }
+        let mut cleanup = || {
+            let Some(name) = by_owner.remove(owner_key) else { return; };
+            if let Some(mut guard) = holders.remove(&name) {
+                tracing::info!(session = %name, "session_lock: released owner");
+                guard.release();
+            }
+            if let Some(hub) = self.hub.as_ref() { hub.clear_session_for_owner(owner_key); }
+        };
+        if let Some(generation) = generation {
+            if let Some(hub) = &self.hub { hub.with_disconnected_owner(owner_key, Some(generation), cleanup); }
+        } else { cleanup(); }
     }
 
     /// Spawn a fresh Terminal in the PTY backend and bind it to `uuid` in
@@ -7770,6 +7765,37 @@ mod tests {
         assert!(state.session_locks.lock().await.contains_key("demo"));
         let last = hub.register_connection("owner", "last");
         drop(last);
+        state.release_disconnected_owner(rx.recv().await.unwrap()).await;
+        assert!(state.session_locks.lock().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn reconnect_while_disconnect_waits_for_holder_map_keeps_lock() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let (state, _, workspace) = make_state_with_workspace_and_hub(&dir);
+        let hub = state.hub.as_ref().unwrap();
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        hub.set_disconnect_sink(tx);
+        let guard = session_lock::acquire(&workspace.join(".locks"), "demo", state.server_id.clone(), "owner").unwrap();
+        state.session_locks.lock().await.insert("demo".into(), guard);
+        state.session_locks_by_owner.lock().await.insert("owner".into(), "demo".into());
+        let old = hub.register_connection("owner", "old");
+        hub.set_session_for_owner("owner", "demo");
+        drop(old);
+        let event = rx.recv().await.unwrap();
+        let holders = state.session_locks.lock().await;
+        let cleanup_state = state.clone();
+        let cleanup = tokio::spawn(async move { cleanup_state.release_disconnected_owner(event).await; });
+        tokio::time::timeout(std::time::Duration::from_secs(1), async {
+            while state.session_locks_by_owner.try_lock().is_ok() { tokio::task::yield_now().await; }
+        }).await.unwrap();
+        let new = hub.register_connection("owner", "new");
+        drop(holders);
+        cleanup.await.unwrap();
+        assert!(state.session_locks.lock().await.contains_key("demo"));
+        // HTTP attach after WS registration must still release on its actual last close.
+        hub.set_session_for_owner("owner", "demo");
+        drop(new);
         state.release_disconnected_owner(rx.recv().await.unwrap()).await;
         assert!(state.session_locks.lock().await.is_empty());
     }
