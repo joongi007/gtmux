@@ -48,6 +48,7 @@ use tracing::{debug, info, warn};
 
 pub mod cmd_router;
 mod hub;
+pub use hub::DisconnectEvent;
 mod payload;
 mod ring;
 mod varint;
@@ -508,6 +509,7 @@ async fn ws_handler(
     let mut response = ws
         .protocols(["gtmux.v1"])
         .on_upgrade(move |socket| async move {
+            let _connection = owner_key.as_deref().map(|owner| hub.register_connection(owner, &connection_id));
             handle_socket(
                 socket,
                 hub.clone(),
@@ -515,18 +517,7 @@ async fn ws_handler(
                 connection_id.clone(),
             )
             .await;
-            if let Some(owner) = owner_key {
-                if let Some(sink) = hub.disconnect_sink() {
-                    // Errors here only mean "no consumer registered" —
-                    // the http-api layer hasn't wired its receiver yet
-                    // (boot ordering) or has already shut down. Either
-                    // way the session lock will be released by the
-                    // server-shutdown path; warn for visibility only.
-                    if sink.send(owner).is_err() {
-                        tracing::debug!("ws disconnect sink closed; auto-release skipped");
-                    }
-                }
-            }
+
         });
     response
         .headers_mut()
@@ -758,6 +749,24 @@ async fn handle_socket(
     loop {
         tokio::select! {
             biased;
+            _ = ping_timer.tick() => {
+                if last_pong.elapsed() > heartbeat.pong_timeout {
+                    info!("ws timeout: no pong for {:?}", last_pong.elapsed());
+                    let _ = send_bounded(
+                        &mut sink,
+                        close_frame(close_codes::INTERNAL, "heartbeat timeout"),
+                        write_timeout,
+                    )
+                    .await;
+                    return;
+                }
+                if send_bounded(&mut sink, Message::Ping(Bytes::new()), write_timeout)
+                    .await
+                    .is_err()
+                {
+                    break;
+                }
+            }
             maybe_msg = stream.next() => {
                 let Some(msg) = maybe_msg else { break };
                 match msg {
@@ -1308,24 +1317,7 @@ async fn handle_socket(
                     }
                 }
             }
-            _ = ping_timer.tick() => {
-                if last_pong.elapsed() > heartbeat.pong_timeout {
-                    info!("ws timeout: no pong for {:?}", last_pong.elapsed());
-                    let _ = send_bounded(
-                        &mut sink,
-                        close_frame(close_codes::INTERNAL, "heartbeat timeout"),
-                        write_timeout,
-                    )
-                    .await;
-                    return;
-                }
-                if send_bounded(&mut sink, Message::Ping(Bytes::new()), write_timeout)
-                    .await
-                    .is_err()
-                {
-                    break;
-                }
-            }
+
         }
     }
 }
@@ -3337,7 +3329,7 @@ bind = "127.0.0.1"
         });
         // Observe the disconnect path — the WS handler emits the cookie
         // value onto this sink when the socket closes (including timeout).
-        let (disc_tx, mut disc_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+        let (disc_tx, mut disc_rx) = tokio::sync::mpsc::unbounded_channel::<DisconnectEvent>();
         hub.set_disconnect_sink(disc_tx);
 
         let app = router(&cfg, gtmux_auth::shared_token(token.clone()), hub.clone());
@@ -3394,7 +3386,7 @@ bind = "127.0.0.1"
             .await
             .expect("disconnect emission within 2s")
             .expect("disc channel still open");
-        assert_eq!(received, cookie);
+        assert_eq!(received.owner, cookie);
     }
 
     /// ADR-0021 D6.2 — a live PONG reply keeps the connection alive and

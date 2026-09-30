@@ -15,7 +15,7 @@
 //!     JSON under the held lock.
 //!   * `peek` is non-blocking; it tries LOCK_SH|LOCK_NB. EWOULDBLOCK ⇒
 //!     in-use; success ⇒ stale (caller may unlink + re-acquire).
-//!   * Dropping a [`LockGuard`] releases the flock and unlinks the file.
+//!   * Dropping a [`LockGuard`] clears its metadata and releases the flock, keeping the inode.
 //!
 //! Single-server invariant (D6.6): callers must serialise concurrent attach
 //! requests on the same session name *before* hitting this module. The
@@ -91,12 +91,13 @@ pub enum LockState {
 }
 
 /// RAII guard returned by [`acquire`]. Releasing it unlocks the flock and
-/// unlinks the file — by `Drop` if you forget to call [`release`] yourself.
+/// keeps the empty lock file — by `Drop` if you forget to call [`release`] yourself.
 pub struct LockGuard {
     path: PathBuf,
     server_id: Arc<str>,
     file: Option<File>,
     released: bool,
+    last_refresh: std::time::Instant,
 }
 
 impl std::fmt::Debug for LockGuard {
@@ -110,6 +111,15 @@ impl std::fmt::Debug for LockGuard {
 }
 
 impl LockGuard {
+    /// Monotonic inactivity bound used only for this server's orphan cleanup.
+    pub fn is_expired(&self) -> bool {
+        self.last_refresh.elapsed() >= std::time::Duration::from_secs(DEFAULT_LEASE_SECS)
+    }
+    #[cfg(test)]
+    pub(crate) fn expire_for_test(&mut self) {
+        self.last_refresh -= std::time::Duration::from_secs(DEFAULT_LEASE_SECS + 1);
+    }
+
     pub fn path(&self) -> &Path {
         &self.path
     }
@@ -130,7 +140,9 @@ impl LockGuard {
                 "lock guard already released",
             )));
         };
-        write_lease_body(file, &lease)
+        write_lease_body(file, &lease)?;
+        self.last_refresh = std::time::Instant::now();
+        Ok(())
     }
 
     /// Manually release. Idempotent — called automatically from `Drop` if
@@ -144,6 +156,9 @@ impl LockGuard {
         }
         self.released = true;
         if let Some(file) = self.file.take() {
+            // Keep the inode: another process may already have it open.
+            // Unlinking would allow a new pathname to carry a second flock.
+            let _ = file.set_len(0);
             // unlock_safely() is infallible on Drop — see `fs2` semantics:
             // FileExt::unlock returns io::Result but a panic-during-drop is
             // worse than a leaked descriptor for a process that's exiting.
@@ -152,13 +167,7 @@ impl LockGuard {
             }
             drop(file);
         }
-        match std::fs::remove_file(&self.path) {
-            Ok(()) => {}
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => {
-                warn!(error = %e, path = %self.path.display(), "session_lock: unlink failed");
-            }
-        }
+
     }
 }
 
@@ -226,6 +235,7 @@ pub fn acquire(
         server_id,
         file: Some(file),
         released: false,
+        last_refresh: std::time::Instant::now(),
     })
 }
 
@@ -246,7 +256,7 @@ pub fn peek(locks_dir: &Path, name: &str) -> LockState {
             // SH succeeded → no exclusive holder. Treat as stale (the holder
             // crashed). Caller may unlink + re-acquire.
             let _ = FileExt::unlock(&file);
-            LockState::Stale
+            if file.metadata().map(|m| m.len() == 0).unwrap_or(false) { LockState::Vacant } else { LockState::Stale }
         }
         Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
             // Someone holds EX. Try to parse the body for the diagnostic.
@@ -307,23 +317,24 @@ pub fn fresh_server_id() -> String {
     )
 }
 
-/// Unlink a stale lock file. Used by callers that detected
-/// [`LockState::Stale`] before retrying [`acquire`]. Safe to call on a
-/// missing path — returns Ok in that case.
+/// Clear stale diagnostic metadata while holding an exclusive flock.
+/// The historical name is retained for callers; this never unlinks the inode.
 pub fn unlink_stale(locks_dir: &Path, name: &str) -> std::io::Result<()> {
     let path = locks_dir.join(format!("{name}.lock"));
-    match std::fs::remove_file(&path) {
-        Ok(()) => Ok(()),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(e) => Err(e),
-    }
+    let file = match OpenOptions::new().read(true).write(true).open(&path) {
+        Ok(file) => file,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(e),
+    };
+    FileExt::try_lock_exclusive(&file)?;
+    file.set_len(0)?;
+    FileExt::unlock(&file)
 }
 
 /// Boot-time housekeeping: walk every session record in `wm` and peek its
 /// `.lock` file. When a peek returns [`LockState::Stale`] — the body
 /// survived but the kernel-level flock is gone (typical SIGKILL trail) —
-/// remove the file so the directory does not grow unboundedly across many
-/// abrupt restarts.
+/// clear its diagnostic body while preserving the stable lock inode.
 ///
 /// **Non-functional**: peek already recognises `Stale` and the next
 /// [`acquire`] would overwrite the body anyway (`set_len(0)` in §acquire);
@@ -397,6 +408,20 @@ mod tests {
     }
 
     #[test]
+    fn release_keeps_inode_and_stale_cleanup_cannot_remove_a_live_lock() {
+        let d = tempfile::TempDir::new().unwrap();
+        let dir = d.path();
+        let mut first = acquire(dir, "same", Arc::from("one"), "owner").unwrap();
+        let preopened = OpenOptions::new().read(true).write(true).open(first.path()).unwrap();
+        assert!(unlink_stale(dir, "same").is_err());
+        first.release();
+        FileExt::try_lock_exclusive(&preopened).unwrap();
+        assert!(matches!(acquire(dir, "same", Arc::from("two"), "other"), Err(LockError::Contended)));
+        FileExt::unlock(&preopened).unwrap();
+        assert!(acquire(dir, "same", Arc::from("two"), "other").is_ok());
+    }
+
+    #[test]
     fn acquire_then_release_creates_and_removes() {
         let d = dir();
         let server_id: Arc<str> = fresh_server_id().into();
@@ -408,7 +433,7 @@ mod tests {
         assert_eq!(lease.ws_conn_id, "conn-A");
         assert!(lease.lease_until_unix > now_unix());
         guard.release();
-        assert!(!locks(&d).join("alpha.lock").exists());
+        assert_eq!(std::fs::metadata(locks(&d).join("alpha.lock")).unwrap().len(), 0);
     }
 
     #[test]
@@ -521,8 +546,8 @@ mod tests {
         assert!(wm.locks_dir().join("beta.lock").exists());
         let cleaned = scan_and_cleanup_stale_locks(&wm);
         assert_eq!(cleaned, 2, "both stale files must be unlinked");
-        assert!(!wm.locks_dir().join("alpha.lock").exists());
-        assert!(!wm.locks_dir().join("beta.lock").exists());
+        assert_eq!(std::fs::metadata(wm.locks_dir().join("alpha.lock")).unwrap().len(), 0);
+        assert_eq!(std::fs::metadata(wm.locks_dir().join("beta.lock")).unwrap().len(), 0);
     }
 
     /// A lock that is **actively held** by another acquirer (e.g. a
@@ -554,6 +579,6 @@ mod tests {
         );
         // Guard is still valid — release explicitly to verify.
         guard.release();
-        assert!(!wm.locks_dir().join("alpha.lock").exists());
+        assert_eq!(std::fs::metadata(wm.locks_dir().join("alpha.lock")).unwrap().len(), 0);
     }
 }

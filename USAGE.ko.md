@@ -1069,3 +1069,13 @@ group 액션 — list. Shortcut 을 잊었을 때 유용.
 - [`QUICKSTART.ko.md`](QUICKSTART.ko.md) — 설치 / 설정 / 인증 /
   session 생성.
 - [`README.ko.md`](README.ko.md) — project 개요.
+
+### 세션 attach 복구
+
+브라우저 연결 종료 시 터미널 프로세스를 죽이지 않고 소유권을 정리한다.
+이전 WebSocket 종료 알림은 새 연결의 attach를 해제하지 않는다. HTTP attach
+후 WebSocket이 열리지 않은 경우 30초 유휴 기간 후 정리한다(5초 간격 검사).
+살아 있는 WebSocket은 보호한다. 서버 간 소유권의 기준은 OS flock이며 lease
+문구가 만료됐다는 이유만으로 인수하지 않는다. 빈 `.locks/*.lock` 파일은
+inode를 유지하기 위해 남겨두므로 실행 중 삭제하지 않는다. 서버 재시작은
+저장된 레이아웃과 달리 실행 중인 터미널 프로세스를 종료할 수 있다.

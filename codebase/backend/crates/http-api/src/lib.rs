@@ -382,7 +382,6 @@ impl AppState {
         let Some(name) = by_owner.get(owner_key).cloned() else {
             return;
         };
-        drop(by_owner);
         let mut holders = self.session_locks.lock().await;
         if let Some(guard) = holders.get_mut(&name) {
             if let Err(e) = guard.refresh_lease(owner_key) {
@@ -392,6 +391,22 @@ impl AppState {
                     "session_lock: lease refresh failed"
                 );
             }
+        }
+    }
+
+    /// Only reap this process's unattached guards. Never override an OS lock
+    /// held by another process, and never time out a live WS from lease text.
+    pub async fn reap_abandoned_attaches(&self) {
+        let mut owners = self.session_locks_by_owner.lock().await;
+        let mut holders = self.session_locks.lock().await;
+        let expired: Vec<_> = owners.iter().filter(|(owner, name)| {
+            holders.get(*name).is_some_and(|guard| guard.is_expired())
+                && !self.hub.as_ref().is_some_and(|hub| hub.has_owner_connection(owner))
+        }).map(|(owner, name)| (owner.clone(), name.clone())).collect();
+        for (owner, name) in expired {
+            owners.remove(&owner);
+            holders.remove(&name);
+            if let Some(hub) = &self.hub { hub.clear_session_for_owner(&owner); }
         }
     }
 
@@ -429,10 +444,22 @@ impl AppState {
     /// ADR-0019 D5.6 / ADR-0019 D6). Called from the WS disconnect consumer
     /// task on close. Idempotent — an owner that never attached is a no-op.
     pub async fn release_lock_for_owner(&self, owner_key: &str) {
+        self.release_owner_if(owner_key, None).await;
+    }
+
+    /// Release only if the disconnect still describes the current owner generation.
+    pub async fn release_disconnected_owner(&self, event: gtmux_ws_server::DisconnectEvent) {
+        self.release_owner_if(&event.owner, Some(event.generation)).await;
+    }
+
+    async fn release_owner_if(&self, owner_key: &str, generation: Option<u64>) {
         // Locks are taken in a fixed order (locks_by_owner → session_locks)
         // anywhere two maps are touched together, so a same-owner attach
         // racing with a disconnect cannot deadlock.
         let mut by_owner = self.session_locks_by_owner.lock().await;
+        if let Some(generation) = generation {
+            if !self.hub.as_ref().is_some_and(|hub| hub.is_disconnected_generation(owner_key, generation)) { return; }
+        }
         let Some(name) = by_owner.remove(owner_key) else {
             return;
         };
@@ -6863,7 +6890,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(release.status(), StatusCode::OK);
-        assert!(!workspace_dir.join(".locks/gamma.lock").exists());
+        assert_eq!(std::fs::metadata(workspace_dir.join(".locks/gamma.lock")).unwrap().len(), 0);
         // Now cookie_b can acquire it.
         assert_eq!(post(cookie_b).await.unwrap().status(), StatusCode::OK);
     }
@@ -7018,7 +7045,7 @@ mod tests {
         state.release_lock_for_owner(cookie_value).await;
         assert!(state.session_locks.lock().await.is_empty());
         assert!(state.session_locks_by_owner.lock().await.is_empty());
-        assert!(!dir.path().join(".locks/manual.lock").exists());
+        assert_eq!(std::fs::metadata(dir.path().join(".locks/manual.lock")).unwrap().len(), 0);
 
         // Idempotent — second call on an absent cookie is a no-op.
         state.release_lock_for_owner(cookie_value).await;
@@ -7705,6 +7732,93 @@ mod tests {
     // ── Implicit detach-on-reattach (session switch UX) ──────────────────
 
     #[tokio::test]
+    async fn old_disconnect_cannot_release_a_reconnected_owner() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let (state, _, workspace) = make_state_with_workspace_and_hub(&dir);
+        let hub = state.hub.as_ref().unwrap();
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        hub.set_disconnect_sink(tx);
+        let guard = session_lock::acquire(&workspace.join(".locks"), "demo", state.server_id.clone(), "owner").unwrap();
+        state.session_locks.lock().await.insert("demo".into(), guard);
+        state.session_locks_by_owner.lock().await.insert("owner".into(), "demo".into());
+        let old = hub.register_connection("owner", "old");
+        drop(old);
+        let stale = rx.recv().await.unwrap();
+        let new = hub.register_connection("owner", "new");
+        state.release_disconnected_owner(stale).await;
+        assert!(state.session_locks.lock().await.contains_key("demo"));
+        drop(new);
+        let stale = rx.recv().await.unwrap();
+        // An HTTP reattach can precede the new WebSocket upgrade.
+        hub.set_session_for_owner("owner", "demo");
+        state.release_disconnected_owner(stale).await;
+        assert!(state.session_locks.lock().await.contains_key("demo"));
+        let last = hub.register_connection("owner", "last");
+        drop(last);
+        state.release_disconnected_owner(rx.recv().await.unwrap()).await;
+        assert!(state.session_locks.lock().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn abandoned_http_attach_expires_but_live_socket_is_protected() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let (state, _, workspace) = make_state_with_workspace_and_hub(&dir);
+        let hub = state.hub.as_ref().unwrap();
+        for name in ["idle", "live", "fresh"] {
+            let mut guard = session_lock::acquire(&workspace.join(".locks"), name, state.server_id.clone(), name).unwrap();
+            if name != "fresh" { guard.expire_for_test(); }
+            state.session_locks.lock().await.insert(name.into(), guard);
+            state.session_locks_by_owner.lock().await.insert(name.into(), name.into());
+        }
+        let connection = hub.register_connection("live", "connection");
+        state.reap_abandoned_attaches().await;
+        let holders = state.session_locks.lock().await;
+        assert!(!holders.contains_key("idle"));
+        assert!(holders.contains_key("live"));
+        assert!(holders.contains_key("fresh"));
+        drop(holders);
+        drop(connection);
+        state.reap_abandoned_attaches().await;
+        assert!(!state.session_locks.lock().await.contains_key("live"));
+    }
+
+    #[tokio::test]
+    async fn attach_and_disconnect_do_not_invert_map_locks() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let (state, token, workspace_dir) = make_state_with_workspace_and_hub(&dir);
+        for name in ["old", "new"] {
+            std::fs::write(workspace_dir.join(format!("{name}.json")),
+                serde_json::to_vec(&json!({"schema_version":2,"groups":[],"items":[],
+                    "viewport":{"x":0,"y":0,"zoom":1}})).unwrap()).unwrap();
+        }
+        let app = router_with_state(state.clone());
+        let request = |name: &str, owner: &str| HttpRequest::builder().method(Method::POST)
+            .uri(format!("/api/sessions/{name}/attach"))
+            .header(header::HOST, TEST_HOST).header(header::AUTHORIZATION, bearer(&token))
+            .header(header::COOKIE, format!("gtmux_auth={owner}"))
+            .body(Body::empty()).unwrap();
+        assert_eq!(app.clone().oneshot(request("old", "old-owner")).await.unwrap().status(), StatusCode::OK);
+        // Force real attach to queue for holders before disconnect does.
+        let holders = state.session_locks.lock().await;
+        let attach = tokio::spawn(app.oneshot(request("new", "new-owner")));
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        let release_state = state.clone();
+        let disconnect = tokio::spawn(async move { release_state.release_lock_for_owner("old-owner").await });
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        drop(holders);
+        let mut attach = attach;
+        let mut disconnect = disconnect;
+        let result = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            let response = (&mut attach).await.unwrap().unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            (&mut disconnect).await.unwrap();
+        }).await;
+        attach.abort(); disconnect.abort();
+        assert!(result.is_ok(), "attach and disconnect deadlocked; both retain LockGuards");
+        assert!(!state.session_locks.lock().await.contains_key("old"));
+    }
+
+    #[tokio::test]
     async fn attach_implicitly_releases_previous_session_for_same_cookie() {
         // ADR-0019 D3 single-attach: when the same cookie attaches to a
         // *different* session, the previous session's flock must auto-release.
@@ -7765,7 +7879,7 @@ mod tests {
             .unwrap();
         assert_eq!(r2.status(), StatusCode::OK);
         // 'one' lock must be gone, 'two' lock present.
-        assert!(!workspace_dir.join(".locks/one.lock").exists());
+        assert_eq!(std::fs::metadata(workspace_dir.join(".locks/one.lock")).unwrap().len(), 0);
         assert!(workspace_dir.join(".locks/two.lock").exists());
         // hub mirror must now point at 'two'.
         assert_eq!(hub.session_for_owner(cookie_value), Some("two".into()));

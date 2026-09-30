@@ -643,7 +643,7 @@ async fn start(args: StartArgs) -> anyhow::Result<()> {
     //   * `disconnect` — emitted on WS close; releases the session lock.
     //   * `heartbeat`  — emitted on every Ping/Pong; refreshes the lease
     //     body so peeking modals see an accurate expected-expiry hint.
-    let (disconnect_tx, mut disconnect_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    let (disconnect_tx, mut disconnect_rx) = tokio::sync::mpsc::unbounded_channel::<gtmux_ws_server::DisconnectEvent>();
     let (heartbeat_tx, mut heartbeat_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
     hub.set_disconnect_sink(disconnect_tx);
     hub.set_heartbeat_sink(heartbeat_tx);
@@ -707,11 +707,16 @@ async fn start(args: StartArgs) -> anyhow::Result<()> {
     // in both sessions' layouts.
     hub.set_session_pane_set_provider(std::sync::Arc::new(app_state.clone()));
 
+    let state_for_reaper = app_state.clone();
+    let _reaper_task = tokio::spawn(async move {
+        let mut tick = tokio::time::interval(std::time::Duration::from_secs(5));
+        loop { tick.tick().await; state_for_reaper.reap_abandoned_attaches().await; }
+    });
     let state_for_disconnect = app_state.clone();
     let _disconnect_task = tokio::spawn(async move {
         while let Some(owner_key) = disconnect_rx.recv().await {
             state_for_disconnect
-                .release_lock_for_owner(&owner_key)
+                .release_disconnected_owner(owner_key)
                 .await;
         }
     });

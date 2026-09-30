@@ -1124,3 +1124,15 @@ shortcuts, group ops. Useful when you've forgotten a shortcut.
 - [`QUICKSTART.md`](QUICKSTART.md) — install, config, auth, session
   creation.
 - [`README.md`](README.md) — project overview.
+
+### Session attach recovery
+
+Disconnected browser ownership is cleaned up without killing its terminals.
+A stale WebSocket close cannot release a newer connection's attach. An HTTP
+attach that never opens a WebSocket is reclaimed after the 30-second idle
+window (checked every five seconds); live WebSockets remain protected.
+The OS flock is authoritative across servers: expired diagnostic lease text
+does not permit takeover. Empty `.locks/*.lock` files are intentionally kept
+to preserve their inode. Do not delete these files while a server is running.
+Restarting a server can terminate live terminal processes even though saved
+layouts survive.
