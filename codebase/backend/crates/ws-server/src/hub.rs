@@ -42,6 +42,11 @@ impl Drop for ConnectionLease {
     }
 }
 
+pub(crate) struct SocketLease(Arc<std::sync::atomic::AtomicUsize>);
+impl Drop for SocketLease {
+    fn drop(&mut self) { self.0.fetch_sub(1, std::sync::atomic::Ordering::SeqCst); }
+}
+
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -359,6 +364,7 @@ impl Default for HeartbeatTimings {
 /// `Hub` is cheap to clone — internal state is `Arc<…>` + broadcast senders.
 #[derive(Clone)]
 pub struct Hub {
+    active_sockets: Arc<std::sync::atomic::AtomicUsize>,
     backend: PtyBackend,
     /// Multiplexed `(pane_id, bytes)` live output stream. Each WS subscriber
     /// receives an independent queue at [`HUB_BROADCAST_CAPACITY`] depth.
@@ -513,6 +519,7 @@ impl Hub {
         });
 
         Self {
+            active_sockets: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             backend,
             pane_output,
             layout_events,
@@ -535,6 +542,16 @@ impl Hub {
             session_pane_set_provider: Arc::new(std::sync::Mutex::new(None)),
             attach_replay_events,
         }
+    }
+
+    pub(crate) fn track_socket(&self) -> SocketLease {
+        self.active_sockets.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        SocketLease(self.active_sockets.clone())
+    }
+
+    /// Number of outstanding WebSocket upgrades/handlers, including bearer-only clients.
+    pub fn active_socket_count(&self) -> usize {
+        self.active_sockets.load(std::sync::atomic::Ordering::SeqCst)
     }
 
     /// Register a sink that receives the cookie value of every closing WS

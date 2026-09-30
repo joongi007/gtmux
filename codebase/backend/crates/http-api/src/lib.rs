@@ -209,6 +209,8 @@ pub struct AppState {
     pub server_id: Arc<str>,
     /// Optional host-selected configuration document.
     pub config_file: Option<ConfigFile>,
+    /// Host-owned stop request. Embedders opt in explicitly; this library never exits the process.
+    pub shutdown_signal: Option<tokio::sync::watch::Sender<bool>>,
     /// Locks currently held by *this* server, keyed by session name. The
     /// outer Mutex protects the map; each [`LockGuard`] inside is itself
     /// the OS-level flock. Serialises same-server attach attempts on the
@@ -307,6 +309,7 @@ impl AppState {
             password_hash_path: None,
             server_id: Arc::from(fresh_server_id()),
             config_file: None,
+            shutdown_signal: None,
             session_locks: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
             session_locks_by_owner: Arc::new(tokio::sync::Mutex::new(
                 std::collections::HashMap::new(),
@@ -375,7 +378,21 @@ impl AppState {
         self
     }
 
-    /// Opt in to authenticated persistent config editing (disabled for embedders by default).
+    /// Opt in to browser stop requests handled by the embedding host.
+    pub fn with_shutdown_signal(mut self, signal: tokio::sync::watch::Sender<bool>) -> Self {
+        self.shutdown_signal = Some(signal);
+        self
+    }
+
+    /// Release only our guards, after terminal teardown has completed.
+    pub async fn release_all_attaches(&self) {
+        let mut owners = self.session_locks_by_owner.lock().await;
+        let mut holders = self.session_locks.lock().await;
+        holders.clear();
+        owners.clear();
+    }
+
+    /// Opt in to authenticated persistent config editing.
     pub fn with_config_file(mut self, file: ConfigFile) -> Self {
         self.config_file = Some(file);
         self
@@ -923,6 +940,7 @@ pub fn router_with_state_and_spa(state: AppState, frontend_dist: Option<&Path>) 
             "/api/terminals/{id}/input",
             axum::routing::post(terminals::input_handler),
         )
+        .route("/api/server/status", axum::routing::get(shutdown::status))
         .route("/api/config", axum::routing::get(config_file::get).put(config_file::put))
         .route("/api/config/preview", axum::routing::post(config_file::preview))
         .route(

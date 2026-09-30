@@ -1,12 +1,21 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import Button from '$lib/ui/Button.svelte';
+  import ShutdownModal from './ShutdownModal.svelte';
+  import { serverStatus, type ServerStatus } from '$lib/http/shutdown';
   import ReauthModal from './ReauthModal.svelte';
   import { configRequest, type ConfigSnapshot, type ServerConfig } from '$lib/http/config';
+  import { settingsStore } from '$lib/stores/settings.svelte';
   import { configEditor as editor } from '$lib/stores/configEditor.svelte';
   import { InvalidCredentialError, CredentialRequiredError, RateLimitedError } from '$lib/http/stepup';
   let busy = $state(false), reauth = $state(false), discard = $state(false);
   let error = $state(''), message = $state('');
+  let stopOpen = $state(false), lifecycle = $state<ServerStatus | null>(null), lifecycleError = $state('');
+  async function refreshStatus(): Promise<void> {
+    try { lifecycle = await serverStatus(); lifecycleError = ''; }
+    catch (e) { lifecycleError = e instanceof Error ? e.message : String(e); }
+  }
+  onMount(() => { void refreshStatus(); });
   const dirty = $derived(editor.fieldsDirty || editor.contents !== editor.snapshot?.contents);
   function accept(snapshot: ConfigSnapshot): void {
     editor.snapshot = snapshot;
@@ -48,7 +57,8 @@
       accept(await configRequest<ConfigSnapshot>('/api/config', 'PUT', {
         contents: editor.contents, revision: editor.snapshot?.revision, credential,
       }));
-      message = 'Configuration saved. Running settings remain unchanged until restart.';
+      await settingsStore.load();
+      message = 'Configuration saved. Behavior settings apply now; other settings apply on restart.';
     } catch (e) {
       if (e instanceof InvalidCredentialError || e instanceof CredentialRequiredError || e instanceof RateLimitedError) throw e;
       error = e instanceof Error ? e.message : String(e);
@@ -56,8 +66,21 @@
   }
 </script>
 
+<h3>Server control</h3>
+<p class="hint">Manage the server shared by all sessions and browser tabs.</p>
+{#if lifecycle}
+  <p class="hint" role="status">{lifecycle.instance} · {lifecycle.state} · {lifecycle.active_terminals} active terminals · {lifecycle.attached_sessions} attached sessions</p>
+  <div class="actions">
+    <Button variant="danger" disabled={!lifecycle.can_shutdown || lifecycle.state === 'stopping'} onclick={() => stopOpen = true}>Stop server…</Button>
+    <Button variant="ghost" onclick={() => void refreshStatus()}>Refresh status</Button>
+  </div>
+  {#if !lifecycle.can_shutdown}<p class="hint">Server lifecycle is managed by the embedding host.</p>{/if}
+  <p class="hint">Restart using the CLI or host application. Automatic restart and background app controls are not available in this server.</p>
+{:else}<p class="hint" role="status">{lifecycleError || 'Loading server status…'}</p>{/if}
+<ShutdownModal open={stopOpen} sessionName={lifecycle?.instance ?? ''} onclose={() => { stopOpen = false; void refreshStatus(); }} />
+
 <h3>Server configuration</h3>
-<p class="hint">Save server settings to TOML. Changes apply on the next start. Command-line flags and environment variables still take precedence over this file.</p>
+<p class="hint">Save server settings to TOML. Behavior settings apply immediately; other changes apply on the next start. Command-line flags and environment variables still take precedence over this file.</p>
 {#if error}<p class="error" role="alert">{error}</p>{/if}
 {#if message}<p class="hint" role="status">{message}</p>{/if}
 {#if !editor.snapshot}

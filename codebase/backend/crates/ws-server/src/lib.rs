@@ -506,9 +506,11 @@ async fn ws_handler(
     // sufficient — uniqueness is required only within a single server
     // boot, and the value is never exposed back to the client.
     let connection_id = mint_connection_id();
+    let socket_lease = hub.track_socket();
     let mut response = ws
         .protocols(["gtmux.v1"])
         .on_upgrade(move |socket| async move {
+            let _socket_lease = socket_lease;
             let _connection = owner_key.as_deref().map(|owner| hub.register_connection(owner, &connection_id));
             handle_socket(
                 socket,
@@ -749,6 +751,49 @@ async fn handle_socket(
     loop {
         tokio::select! {
             biased;
+            shutdown = server_shutdown_rx.recv() => {
+                match shutdown {
+                    Ok(event) => {
+                        // Server-wide broadcast (Slice D-5, ADR-0014
+                        // D12). Emit one envelope, then break the
+                        // select loop so the close handshake runs.
+                        let env = Envelope::new(
+                            FrameType::ServerShutdown,
+                            Bytes::from(payload::encode_server_shutdown(
+                                &event.reason,
+                                event.expected_exit_code,
+                            )),
+                        );
+                        if let Ok(buf) = env.encode() {
+                            let _ = send_bounded(&mut sink, Message::Binary(buf), write_timeout).await;
+                        }
+                        // Send the close frame ourselves so the FE sees
+                        // a deterministic ordering: 0x89 envelope then
+                        // 1000 normal close. The host owns subsequent process teardown.
+                        let _ = send_bounded(
+                            &mut sink,
+                            Message::Close(Some(axum::extract::ws::CloseFrame {
+                                code: 1000,
+                                reason: "server_shutdown".into(),
+                            })),
+                            write_timeout,
+                        )
+                        .await;
+                        break;
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                        // Channel capacity is 16 vs ~1 send per lifetime
+                        // — lagging would mean we missed our only
+                        // notification. Treat as still-shutdown and
+                        // drop the connection.
+                        break;
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                        // Hub dropped — other arms will hit Closed too.
+                    }
+                }
+            }
+
             _ = ping_timer.tick() => {
                 if last_pong.elapsed() > heartbeat.pong_timeout {
                     info!("ws timeout: no pong for {:?}", last_pong.elapsed());
@@ -1181,49 +1226,6 @@ async fn handle_socket(
                                 session_pane_set = None;
                             }
                         }
-                    }
-                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
-                        // Hub dropped — other arms will hit Closed too.
-                    }
-                }
-            }
-            shutdown = server_shutdown_rx.recv() => {
-                match shutdown {
-                    Ok(event) => {
-                        // Server-wide broadcast (Slice D-5, ADR-0014
-                        // D12). Emit one envelope, then break the
-                        // select loop so the close handshake runs.
-                        let env = Envelope::new(
-                            FrameType::ServerShutdown,
-                            Bytes::from(payload::encode_server_shutdown(
-                                &event.reason,
-                                event.expected_exit_code,
-                            )),
-                        );
-                        if let Ok(buf) = env.encode() {
-                            let _ = send_bounded(&mut sink, Message::Binary(buf), write_timeout).await;
-                        }
-                        // Send the close frame ourselves so the FE sees
-                        // a deterministic ordering: 0x89 envelope then
-                        // 1000 normal close. The process will exit a
-                        // few hundred ms later via the http-api task.
-                        let _ = send_bounded(
-                            &mut sink,
-                            Message::Close(Some(axum::extract::ws::CloseFrame {
-                                code: 1000,
-                                reason: "server_shutdown".into(),
-                            })),
-                            write_timeout,
-                        )
-                        .await;
-                        break;
-                    }
-                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
-                        // Channel capacity is 16 vs ~1 send per lifetime
-                        // — lagging would mean we missed our only
-                        // notification. Treat as still-shutdown and
-                        // drop the connection.
-                        break;
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => {
                         // Hub dropped — other arms will hit Closed too.

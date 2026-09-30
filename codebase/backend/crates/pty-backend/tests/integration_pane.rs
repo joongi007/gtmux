@@ -493,3 +493,39 @@ async fn activity_is_observed_without_output_subscribers() {
     assert!(backend.activity(pane).is_none());
     assert!(!backend.report_activity(pane, ActivityState::Completed));
 }
+
+/// Shutdown must work even while the Hub or embedder retains backend handles.
+#[test]
+fn explicit_shutdown_reaps_and_fences_late_spawns() {
+    let backend = gtmux_pty_backend::PtyBackend::new();
+    let mut spec = gtmux_pty_backend::SpawnSpec::default_shell();
+    spec.command = Some("/bin/sh".into());
+    spec.args = vec!["-c".into(), "exec sleep 60".into()];
+    let id = backend.spawn(spec.clone()).expect("spawn");
+    let retained = backend.clone();
+    backend.shutdown();
+    assert_eq!(retained.pane_count(), 0);
+    assert!(retained.subscribe_output(id).is_none());
+    assert!(retained.spawn(spec.clone()).is_err());
+    assert!(retained.spawn_with_request(spec, "late".into()).is_err());
+    retained.shutdown();
+}
+
+#[test]
+fn concurrent_spawn_cannot_escape_shutdown() {
+    let backend = gtmux_pty_backend::PtyBackend::new();
+    let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+    let other = backend.clone();
+    let ready = barrier.clone();
+    let spawn = std::thread::spawn(move || {
+        let mut spec = gtmux_pty_backend::SpawnSpec::default_shell();
+        spec.command = Some("/bin/sh".into());
+        spec.args = vec!["-c".into(), "exec sleep 60".into()];
+        ready.wait();
+        other.spawn(spec)
+    });
+    barrier.wait();
+    backend.shutdown();
+    let _ = spawn.join().expect("spawn thread");
+    assert_eq!(backend.pane_count(), 0);
+}

@@ -590,6 +590,7 @@ pub struct PtyBackend {
 
 #[derive(Debug)]
 struct PtyBackendInner {
+    stopping: std::sync::RwLock<bool>,
     panes: DashMap<PaneId, Arc<PaneHandle>>,
     next_id: AtomicU64,
     /// NOTIFY_MIRROR broadcast — every pane spawn/die event lands here
@@ -638,12 +639,21 @@ impl PtyBackend {
         let (notify_tx, _) = broadcast::channel(BROADCAST_CAPACITY);
         Self {
             inner: Arc::new(PtyBackendInner {
+                stopping: std::sync::RwLock::new(false),
                 panes: DashMap::new(),
                 next_id: AtomicU64::new(1),
                 notify_tx,
                 session_marker,
             }),
         }
+    }
+
+    /// Stop accepting spawns and reap all panes, even when hosts retain backend clones.
+    /// Call on a blocking thread. A write gate fences in-flight spawns.
+    pub fn shutdown(&self) {
+        let mut stopping = self.inner.stopping.write().unwrap_or_else(|e| e.into_inner());
+        *stopping = true;
+        self.inner.reap_all();
     }
 
     /// Subscribe to backend-level notifications (spawned / died /
@@ -852,9 +862,13 @@ impl PtyBackend {
 }
 
 impl Drop for PtyBackendInner {
+    fn drop(&mut self) { self.reap_all(); }
+}
+
+impl PtyBackendInner {
     /// Graceful server teardown: signal every pane in parallel, wait
     /// the grace period, then escalate. ADR-0014 D5 + D7 step 1.
-    fn drop(&mut self) {
+    fn reap_all(&self) {
         if self.panes.is_empty() {
             return;
         }
@@ -904,6 +918,11 @@ fn spawn_inner(
     spec: SpawnSpec,
     request_id: Option<String>,
 ) -> Result<PaneId> {
+    let stopping = inner.stopping.read().unwrap_or_else(|e| e.into_inner());
+    if *stopping {
+        return Err(PtyBackendError::SpawnFailed(anyhow::anyhow!("server is stopping")));
+    }
+
     let pty_system = native_pty_system();
     let rows = if spec.rows == 0 { 24 } else { spec.rows };
     let cols = if spec.cols == 0 { 80 } else { spec.cols };

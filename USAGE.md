@@ -1153,7 +1153,8 @@ Saved startup settings take effect on restart, not immediately. CLI flags and
 GTMUX environment overrides still win. The UI shows the running address and
 whether saved startup settings differ from boot. Comments are retained.
 Behavior switches persist in `[behavior]` and apply live only after a
-successful save. Direct TOML changes load on restart. Invalid external TOML
+successful save, including Behavior edits saved from the advanced editor.
+External file edits load on restart. Invalid external TOML
 blocks Behavior saves rather than overwriting the file. Browser appearance
 preferences remain browser-local. Embedded hosts must explicitly supply
 `ConfigFile` to enable persistence; otherwise Behavior stays memory-only.
@@ -1163,3 +1164,28 @@ The CLI selects the explicit `--config` file or the per-instance default
 first successful save. Configuration saves never restart the server or stop
 terminals. Restart manually after reviewing the saved file and current CLI
 overrides; port occupancy is checked when binding at startup.
+
+### Server status and safe stop
+
+**Settings → Server → Stop server** shows the instance and the number of
+active terminals across all sessions. Confirm with your token/password.
+Stopping ends running terminal programs; it preserves saved layouts and
+configuration, but does not suspend or checkpoint processes. New terminal
+spawns are fenced during teardown. WebSockets receive the shutdown notice,
+HTTP requests have up to ten seconds to drain and detached WebSocket handlers
+have up to two additional seconds to close, then the backend reaps its
+children before releasing attach guards and removing the pidfile. Browser
+shutdown retains CLI exit code 6; SIGINT/SIGTERM use the same cleanup path.
+
+`GET /api/server/status` requires authentication and reports lifecycle state,
+capabilities and server-wide counts. Embedded hosts opt in through
+`AppState::with_shutdown_signal`; the HTTP library never exits the host
+process. The host must consume the request and perform cleanup. Without this
+integration browser stop is disabled. For explicit cleanup with retained
+backend clones, call `PtyBackend::shutdown` on a blocking thread, then
+`AppState::release_all_attaches`.
+
+Automatic restart, Electron window/tray/background permissions and web/app
+launch modes are future work. Restart the standalone server using the same
+`gtmux start --name <instance> --config <path>` command. A newly saved port
+applies on that start; update any reverse proxy and CLI overrides accordingly.

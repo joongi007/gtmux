@@ -1309,7 +1309,7 @@
         </section>
       </div>
       <footer class="settings-foot">
-        <div class="dstate"><span class="dot"></span><span>All changes save automatically</span></div>
+        <div class="dstate"><span class="dot"></span><span>{section === 'server' ? 'Server configuration requires Save configuration' : 'All changes save automatically'}</span></div>
       </footer>
     </div>
   </div>

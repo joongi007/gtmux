@@ -344,7 +344,7 @@ fn main() -> ExitCode {
             config_path,
             workspace_override: workspace_path,
         })) {
-            Ok(()) => ExitCode::SUCCESS,
+            Ok(code) => code,
             Err(e) => report_start_error(e),
         },
         Cmd::Stop { name, force } => rt.block_on(stop(&name, force)),
@@ -429,7 +429,7 @@ struct StartArgs {
 ///  11) print first-run banner     — D21 c1 + ADR-0003 D3 token URL
 ///  12) install shutdown handlers  — SIGINT + SIGTERM → graceful (D5 daemon ⊥)
 ///  13) axum::serve(...)           — with_graceful_shutdown
-async fn start(args: StartArgs) -> anyhow::Result<()> {
+async fn start(args: StartArgs) -> anyhow::Result<ExitCode> {
     // 1a) Nested-tmux startup guard — ADR-0014 D10 amend (2026-05-14) 1차 방어.
     //     If the user is running gtmux from inside an existing outer tmux
     //     session, the inherited `TMUX` env makes the child shells we spawn
@@ -696,6 +696,9 @@ async fn start(args: StartArgs) -> anyhow::Result<()> {
         Err(error) => { warn!(%error, "configuration editor unavailable"); app_state }
     };
 
+    let (shutdown_tx, mut shutdown_rx) = tokio::sync::watch::channel(false);
+    let app_state = app_state.with_shutdown_signal(shutdown_tx.clone());
+
     // Stage 5 D10 α: register the cookie validator so the WS handshake
     // accepts cookie auth as an alternative to the subprotocol bearer
     // (ADR-0020 D10 additive). The legacy bearer path stays in place —
@@ -763,7 +766,7 @@ async fn start(args: StartArgs) -> anyhow::Result<()> {
         }
     });
 
-    let app = build_router(app_state, &config, shared.clone(), hub.clone());
+    let app = build_router(app_state.clone(), &config, shared.clone(), hub.clone());
 
     // 10) bind — TCP only for now (unix socket variant lives behind
     //    `bind = "unix:/..."` and is a planned alt-path; surface a friendly
@@ -819,7 +822,22 @@ async fn start(args: StartArgs) -> anyhow::Result<()> {
     //    The graceful shutdown future ends when *either* fires; axum then
     //    drains in-flight requests. ADR-0014 D5: dropping the PtyBackend
     //    sends SIGTERM → 200 ms grace → SIGKILL to every child shell.
-    let shutdown_signal = wait_for_shutdown();
+    let shutdown_hub = hub.clone();
+    let api_requested = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let api_flag = api_requested.clone();
+    let mut drain_rx = shutdown_rx.clone();
+    let shutdown_signal = async move {
+        tokio::select! {
+            _ = wait_for_shutdown() => {},
+            _ = wait_for_stop_request(&mut shutdown_rx) => {
+                api_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+            }
+        }
+        shutdown_tx.send_replace(true);
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        let api = api_flag.load(std::sync::atomic::Ordering::Relaxed);
+        shutdown_hub.publish_server_shutdown(if api { "user_initiated" } else { "signal" }, if api { 6 } else { 0 });
+    };
 
     // 13) serve.
     //    `into_make_service_with_connect_info::<SocketAddr>()` inserts the peer
@@ -830,12 +848,38 @@ async fn start(args: StartArgs) -> anyhow::Result<()> {
     //    When a unix-socket bind is eventually wired it will have no peer IP;
     //    `peer_from_parts` returns `None` there and the rate-limit key falls
     //    back to XFF-ignore (single bucket), which is the fail-closed default.
-    let serve_result = axum::serve(
+    let server = axum::serve(
         listener,
         app.into_make_service_with_connect_info::<SocketAddr>(),
     )
-    .with_graceful_shutdown(shutdown_signal)
-    .await;
+    .with_graceful_shutdown(shutdown_signal);
+    let serve = std::future::IntoFuture::into_future(server);
+    tokio::pin!(serve);
+    let serve_result = tokio::select! {
+        result = &mut serve => result,
+        _ = wait_for_stop_request(&mut drain_rx) => {
+            match tokio::time::timeout(std::time::Duration::from_secs(10), &mut serve).await {
+                Ok(result) => result,
+                Err(_) => { warn!("HTTP drain exceeded 10 seconds; continuing terminal teardown"); Ok(()) }
+            }
+        }
+    };
+    // Upgraded sockets are detached from axum's HTTP drain. Let their
+    // shutdown frames/close handlers finish even when there are no PTYs.
+    let sockets_closed = async {
+        while hub.active_socket_count() != 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    };
+    if tokio::time::timeout(std::time::Duration::from_secs(2), sockets_closed).await.is_err() {
+        warn!(remaining = hub.active_socket_count(), "WebSocket shutdown drain timed out");
+    }
+    // Background consumers retain AppState/Hub/backend clones. Dropping one
+    // backend handle alone would not run its destructor.
+    _reaper_task.abort(); _disconnect_task.abort(); _heartbeat_task.abort(); _pane_died_task.abort();
+    let cleanup_backend = backend.clone();
+    tokio::task::spawn_blocking(move || cleanup_backend.shutdown()).await.context("terminal teardown")?;
+    app_state.release_all_attaches().await;
 
     // Post-shutdown — drop the PtyBackend so its `Drop` impl runs the
     // ADR-0014 D7 teardown step 1 (SIGTERM → grace → SIGKILL fan-out
@@ -860,7 +904,8 @@ async fn start(args: StartArgs) -> anyhow::Result<()> {
 
     print_farewell(&config.server.session);
 
-    serve_result.context("axum::serve")
+    serve_result.context("axum::serve")?;
+    Ok(if api_requested.load(std::sync::atomic::Ordering::Relaxed) { ExitCode::from(6) } else { ExitCode::SUCCESS })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1056,6 +1101,12 @@ fn init_tracing(config: &Config) {
 /// Resolve the future that drives `with_graceful_shutdown`. Returns on either
 /// SIGINT (Ctrl-C) or SIGTERM (`kill <pid>`). Each completion path logs the
 /// trigger before the daemon-survive guarantee from D21 c5 kicks in.
+async fn wait_for_stop_request(rx: &mut tokio::sync::watch::Receiver<bool>) {
+    // Drop watch::Ref before returning to select branches. Holding it while
+    // the shutdown future sends a state update would deadlock send_replace.
+    let _ = rx.wait_for(|requested| *requested).await;
+}
+
 async fn wait_for_shutdown() {
     // Per-signal handles must be created *before* we race on them. If
     // `signal()` fails we fall back to listening on whichever did succeed.
@@ -2628,5 +2679,18 @@ mod tests {
             }
             other => panic!("expected Alive(self), got {other:?}"),
         }
+    }
+}
+
+#[cfg(test)]
+mod lifecycle_tests {
+    #[tokio::test]
+    async fn stop_waiter_releases_watch_read_lock_before_draining() {
+        let (tx, mut rx) = tokio::sync::watch::channel(true);
+        super::wait_for_stop_request(&mut rx).await;
+        let (done, result) = std::sync::mpsc::channel();
+        let writer = std::thread::spawn(move || { tx.send_replace(true); done.send(()).unwrap(); });
+        result.recv_timeout(std::time::Duration::from_secs(1)).expect("watch read lock released");
+        writer.join().unwrap();
     }
 }
