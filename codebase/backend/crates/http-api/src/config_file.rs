@@ -7,6 +7,12 @@ use serde_json::json;
 use fs2::FileExt;
 use crate::{AppState, auth::{StepUpBody, verify_step_up}};
 const LIMIT: usize = 128 * 1024;
+// Explicit unlock also releases any transient fork-inherited descriptor before
+// exec closes it; closing only this descriptor can retain the shared flock.
+struct WriterLock(std::fs::File);
+impl Drop for WriterLock {
+    fn drop(&mut self) { let _ = FileExt::unlock(&self.0); }
+}
 
 /// The embedder must explicitly opt in to file editing by supplying this path.
 #[derive(Clone)]
@@ -96,6 +102,7 @@ impl ConfigFile {
         }
         let lock = std::fs::OpenOptions::new().create(true).truncate(false).read(true).write(true).open(lock_path).map_err(|e| fail(e.to_string()))?;
         lock.try_lock_exclusive().map_err(|e| (StatusCode::CONFLICT, e.to_string()))?;
+        let _lock = WriterLock(lock);
         let current = read(&self.path).map_err(fail)?;
         if revision(current.as_deref()) != expected { return Err((StatusCode::CONFLICT, "Configuration changed on disk; reload before saving".into())); }
         if std::fs::metadata(&self.path).is_ok_and(|m| m.permissions().readonly()) { return Err(fail("Configuration file is read-only".into())); }
@@ -131,10 +138,20 @@ pub(crate) async fn put(State(state): State<AppState>, req: Request) -> Response
     if save.contents.len() > LIMIT { return error(StatusCode::PAYLOAD_TOO_LARGE, "Configuration exceeds 128 KiB".into()); }
     if let Err(e) = verify_step_up(&state, &parts.headers, crate::auth::peer_from_parts(&parts), &StepUpBody { credential: save.credential }).await { return e.into_response(); }
     let Some(file) = state.config_file.clone() else { return error(StatusCode::SERVICE_UNAVAILABLE, "Host has not enabled file editing".into()); };
+    let parsed = match gtmux_config::parse_document(&save.contents) {
+        Ok(parsed) => parsed, Err(e) => return error(StatusCode::BAD_REQUEST, e.to_string()),
+    };
+    // Serialize with Settings PATCH so it cannot overwrite an accepted TOML save.
+    let mut behavior = state.behavior_settings.write().await;
     let config = state.config.clone();
-    match tokio::task::spawn_blocking(move || { file.save(&save.revision, &save.contents, &config.server.session)?;
-        file.snapshot(&config).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e)) }).await {
-        Ok(Ok(snapshot)) => Json(snapshot).into_response(),
+    match tokio::task::spawn_blocking(move || {
+        file.save(&save.revision, &save.contents, &config.server.session)?;
+        Ok::<_, (StatusCode, String)>(file.snapshot(&config))
+    }).await {
+        Ok(Ok(snapshot)) => {
+            *behavior = parsed.behavior;
+            match snapshot { Ok(value) => Json(value).into_response(), Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, e) }
+        },
         Ok(Err((status, message))) => error(status, message),
         Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
     }
@@ -201,12 +218,20 @@ mod tests {
         assert!(state.behavior_settings.read().await.picker_show_hidden);
         assert!(gtmux_config::parse_document(&std::fs::read_to_string(&path).unwrap()).unwrap().behavior.picker_show_hidden);
         assert_eq!(state.config_file.as_ref().unwrap().snapshot(&state.config).unwrap()["restart_required"], false);
+        let current = state.config_file.as_ref().unwrap().snapshot(&state.config).unwrap();
+        let changed = current["contents"].as_str().unwrap().replace("picker_show_hidden = true", "picker_show_hidden = false");
+        let response = app.clone().oneshot(request("PUT", "/api/config", true,
+            json!({"contents":changed,"revision":current["revision"],"credential":token.0}))).await.unwrap();
+        let status = response.status();
+        let body = to_bytes(response.into_body(), 100000).await.unwrap();
+        assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+        assert!(!state.behavior_settings.read().await.picker_show_hidden);
         // Invalid external edits must not be overwritten or applied in memory.
         std::fs::write(&path, "broken=[").unwrap();
         let response = app.oneshot(request("PATCH", "/api/settings", true,
-            json!({"behavior":{"picker_show_hidden":false}}))).await.unwrap();
+            json!({"behavior":{"picker_show_hidden":true}}))).await.unwrap();
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-        assert!(state.behavior_settings.read().await.picker_show_hidden);
+        assert!(!state.behavior_settings.read().await.picker_show_hidden);
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "broken=[");
     }
 
