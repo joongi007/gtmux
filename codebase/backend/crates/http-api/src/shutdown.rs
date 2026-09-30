@@ -167,6 +167,7 @@ mod tests {
             default_session_workspace: None,
             auth: gtmux_config::AuthConfig::default(),
             assets: gtmux_config::AssetsConfig::default(),
+            behavior: gtmux_config::BehaviorSettings::default(),
         };
         let state = AppState::new(cfg, token.clone());
         (state, token)

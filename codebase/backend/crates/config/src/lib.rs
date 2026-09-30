@@ -71,6 +71,54 @@ pub fn derive_mode(bind: &str) -> Mode {
 //  Schema structs
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// Mutable behavior settings.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default, deny_unknown_fields)]
+pub struct BehaviorSettings {
+    /// ADR-0021 G25.1.b: when true, panel close = panel + terminal SIGTERM
+    /// with no per-action dialog. Default `false` per `bool::default()`.
+    pub auto_kill_terminal_on_panel_close: bool,
+    /// ADR-0035 D7: when true, FilePicker shows dot-prefixed entries
+    /// (e.g. `.git`, `.env`, `.config`). Default `false` — hidden entries
+    /// are skipped (typical UX). Toggleable from Settings UI.
+    pub picker_show_hidden: bool,
+    /// 0077 follow-up: when true, switching from one active session to a
+    /// different session triggers a full `window.location.reload()` after
+    /// the new layout has loaded. First attach (`idle → session`) and modal
+    /// cancel paths (`cancelAttachConfirm`) are *not* affected. Forcing a
+    /// reload re-runs the auth gate + attach + self-heal pipeline, so any
+    /// FE-side cache divergence from the BE (e.g. stale `terminalPool`,
+    /// stuck WS subscribers) is reset at a well-defined boundary.
+    /// Default `true` per the user request.
+    #[serde(default = "default_reload_on_session_switch")]
+    pub reload_on_session_switch: bool,
+    /// ADR-0049: when true, the FE may honor terminal OSC 52 clipboard
+    /// *write* sequences (e.g. drag-copy from a mouse-mode TUI like
+    /// `claude`). Default `false` — security-defaults §1.6 forbids
+    /// auto-enable; the user must explicitly opt in. The BE only stores
+    /// and exposes this flag; all clipboard logic, the secure-context
+    /// gate, and OSC 52 read-blocking live entirely in the FE.
+    #[serde(default)]
+    pub osc52_clipboard_write_enabled: bool,
+}
+
+const fn default_reload_on_session_switch() -> bool {
+    true
+}
+
+impl Default for BehaviorSettings {
+    fn default() -> Self {
+        Self {
+            auto_kill_terminal_on_panel_close: false,
+            picker_show_hidden: false,
+            reload_on_session_switch: default_reload_on_session_switch(),
+            // Security default: never auto-enable (ADR-0049 D3-a,
+            // security-defaults §1.6). Must stay `false`.
+            osc52_clipboard_write_enabled: false,
+        }
+    }
+}
+
 /// gtmux Server 최상위 config. D22 schema의 1:1 mirror.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -120,6 +168,9 @@ pub struct Config {
     /// Asset upload/storage limits. 생략 시 default — asset 1개당 50 MiB.
     #[serde(default)]
     pub assets: AssetsConfig,
+    /// Persisted UI behavior preferences, also mutable through PATCH /api/settings.
+    #[serde(default)]
+    pub behavior: BehaviorSettings,
 }
 
 /// `[server]` 섹션 — Server identity 영역.
@@ -352,19 +403,7 @@ pub fn load_with_overrides(
 ) -> Result<Config, ConfigError> {
     // 1) 빌트인 디폴트 — runtime / security 만 안전 디폴트 보유, server는 사용자
     //    명시 필수라 dummy로 채워두고 검증에서 잡는다.
-    let defaults = DefaultsSeed {
-        schema_version: SCHEMA_VERSION,
-        server: ServerSeed::default(),
-        runtime: RuntimeConfig::default(),
-        security: SecurityConfig::default(),
-        cloud: None,
-        frontend_dist: None,
-        workspace_path: None,
-        server_workspace: None,
-        default_session_workspace: None,
-        auth: AuthConfig::default(),
-        assets: AssetsConfig::default(),
-    };
+    let defaults = defaults_seed();
 
     let mut figment = Figment::from(Serialized::defaults(defaults));
 
@@ -398,6 +437,31 @@ pub fn load_with_overrides(
     }
 
     let cfg: Config = figment.extract()?;
+    validate(&cfg)?;
+    Ok(cfg)
+}
+
+fn defaults_seed() -> DefaultsSeed {
+DefaultsSeed {
+        schema_version: SCHEMA_VERSION,
+        server: ServerSeed::default(),
+        runtime: RuntimeConfig::default(),
+        security: SecurityConfig::default(),
+        cloud: None,
+        frontend_dist: None,
+        workspace_path: None,
+        server_workspace: None,
+        default_session_workspace: None,
+        auth: AuthConfig::default(),
+        assets: AssetsConfig::default(),
+        behavior: BehaviorSettings::default(),
+    }
+}
+
+/// Validate a saved document without environment or CLI overrides masking errors.
+pub fn parse_document(text: &str) -> Result<Config, ConfigError> {
+    let cfg: Config = Figment::from(Serialized::defaults(defaults_seed()))
+        .merge(Toml::string(text)).extract()?;
     validate(&cfg)?;
     Ok(cfg)
 }
@@ -470,6 +534,7 @@ struct DefaultsSeed {
     default_session_workspace: Option<std::path::PathBuf>,
     auth: AuthConfig,
     assets: AssetsConfig,
+    behavior: BehaviorSettings,
 }
 
 #[derive(Debug, Clone, Serialize)]

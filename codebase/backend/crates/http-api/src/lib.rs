@@ -60,6 +60,8 @@ mod session_lock;
 mod session_pane_set;
 mod sessions;
 mod settings;
+mod config_file;
+pub use config_file::ConfigFile;
 mod shutdown;
 mod terminal_map;
 mod terminals;
@@ -205,6 +207,8 @@ pub struct AppState {
     /// `.locks/<name>.lock` bodies so other servers can disambiguate
     /// holders that happen to share a PID.
     pub server_id: Arc<str>,
+    /// Optional host-selected configuration document.
+    pub config_file: Option<ConfigFile>,
     /// Locks currently held by *this* server, keyed by session name. The
     /// outer Mutex protects the map; each [`LockGuard`] inside is itself
     /// the OS-level flock. Serialises same-server attach attempts on the
@@ -294,6 +298,7 @@ impl AppState {
                 Arc::new(Vec::new())
             }
         };
+        let behavior_settings = Arc::new(RwLock::new(config.behavior));
         Self {
             session_table,
             rate_limiter: default_rate_limiter(),
@@ -301,6 +306,7 @@ impl AppState {
             password_hash: Arc::new(RwLock::new(None)),
             password_hash_path: None,
             server_id: Arc::from(fresh_server_id()),
+            config_file: None,
             session_locks: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
             session_locks_by_owner: Arc::new(tokio::sync::Mutex::new(
                 std::collections::HashMap::new(),
@@ -326,7 +332,7 @@ impl AppState {
             workspace_manifest: Arc::new(RwLock::new(WorkspaceManifest::default())),
             session_counts: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
             session_cache: Arc::new(SessionCache::new()),
-            behavior_settings: default_behavior_settings(),
+            behavior_settings,
             file_open: FileOpenContext::production(),
             respawn_locks: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
             attach_index: Arc::new(attach_index::AttachIndex::new()),
@@ -366,6 +372,12 @@ impl AppState {
     /// [`AppState::new_shared`].
     pub fn with_trusted_proxy_nets(mut self, nets: Vec<ipnet::IpNet>) -> Self {
         self.trusted_proxy_nets = Arc::new(nets);
+        self
+    }
+
+    /// Opt in to authenticated persistent config editing (disabled for embedders by default).
+    pub fn with_config_file(mut self, file: ConfigFile) -> Self {
+        self.config_file = Some(file);
         self
     }
 
@@ -916,6 +928,8 @@ pub fn router_with_state_and_spa(state: AppState, frontend_dist: Option<&Path>) 
             "/api/terminals/{id}/input",
             axum::routing::post(terminals::input_handler),
         )
+        .route("/api/config", axum::routing::get(config_file::get).put(config_file::put))
+        .route("/api/config/preview", axum::routing::post(config_file::preview))
         .route(
             "/api/settings",
             get(settings::get_handler).patch(settings::patch_handler),
@@ -1396,6 +1410,7 @@ mod tests {
             default_session_workspace: None,
             auth: gtmux_config::AuthConfig::default(),
             assets: gtmux_config::AssetsConfig::default(),
+            behavior: gtmux_config::BehaviorSettings::default(),
         }
     }
 

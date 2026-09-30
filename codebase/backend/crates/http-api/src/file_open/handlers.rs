@@ -350,6 +350,7 @@ mod tests {
             default_session_workspace: None,
             auth: gtmux_config::AuthConfig::default(),
             assets: gtmux_config::AssetsConfig::default(),
+            behavior: gtmux_config::BehaviorSettings::default(),
         };
         let tmp = TempDir::new().unwrap();
         let mut state = crate::AppState::new(cfg, token.clone());

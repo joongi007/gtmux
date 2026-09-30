@@ -1136,3 +1136,30 @@ does not permit takeover. Empty `.locks/*.lock` files are intentionally kept
 to preserve their inode. Do not delete these files while a server is running.
 Restarting a server can terminate live terminal processes even though saved
 layouts survive.
+
+### Persistent server configuration
+
+Open **Settings → Server** to edit the instance TOML file. Common fields cover
+the port and workspace folders; Advanced TOML exposes the rest of the existing
+schema, including proxy/security settings. Apply common fields to the draft,
+then Save configuration and confirm with your token/password. Save validates
+the document and writes atomically; errors keep the draft and running values.
+External changes produce a conflict: reload explicitly before retrying.
+Concurrent cooperating gtmux writers are serialized; unrelated editors must
+not write concurrently with a save (a final revision check narrows but cannot
+eliminate that filesystem race). Symlink config files are not editable here.
+
+Saved startup settings take effect on restart, not immediately. CLI flags and
+GTMUX environment overrides still win. The UI shows the running address and
+whether saved startup settings differ from boot. Comments are retained.
+Behavior switches persist in `[behavior]` and apply live only after a
+successful save. Direct TOML changes load on restart. Invalid external TOML
+blocks Behavior saves rather than overwriting the file. Browser appearance
+preferences remain browser-local. Embedded hosts must explicitly supply
+`ConfigFile` to enable persistence; otherwise Behavior stays memory-only.
+
+The CLI selects the explicit `--config` file or the per-instance default
+`~/.config/gtmux/<name>.config.toml`. A missing default file is created on the
+first successful save. Configuration saves never restart the server or stop
+terminals. Restart manually after reviewing the saved file and current CLI
+overrides; port occupancy is checked when binding at startup.

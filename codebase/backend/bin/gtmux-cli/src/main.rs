@@ -686,6 +686,15 @@ async fn start(args: StartArgs) -> anyhow::Result<()> {
         password_hash,
         trusted_proxy_nets,
     );
+    let editable_path = match config_path {
+        Some(path) => path.to_path_buf(),
+        None => config_path_for(&args.instance)?,
+    };
+    let editable_path = if editable_path.is_absolute() { editable_path } else { std::env::current_dir()?.join(editable_path) };
+    let app_state = match gtmux_http_api::ConfigFile::new(editable_path) {
+        Ok(file) => app_state.with_config_file(file),
+        Err(error) => { warn!(%error, "configuration editor unavailable"); app_state }
+    };
 
     // Stage 5 D10 α: register the cookie validator so the WS handshake
     // accepts cookie auth as an alternative to the subprotocol bearer

@@ -57,6 +57,7 @@
   import { shutdownDialog } from '$lib/stores/shutdownDialog.svelte';
 
   import SettingsSwitch from './SettingsSwitch.svelte';
+  import ServerSettings from './ServerSettings.svelte';
   import ActivitySettings from './ActivitySettings.svelte';
   import { tabTitleStore } from '$lib/stores/tabTitle.svelte';
   import {
@@ -130,6 +131,7 @@
       label: 'System',
       items: [
         { id: 'auth', label: 'Auth' },
+        { id: 'server', label: 'Server' },
         { id: 'about', label: 'About' },
       ],
     },
@@ -1124,8 +1126,7 @@
           {:else if section === 'behavior'}
             <h3 class="section-head">Behavior</h3>
             <p class="section-hint">
-              Per-action defaults. Settings persist for the lifetime of the
-              server process.
+              Per-action defaults. Settings apply immediately. When file editing is enabled, they are saved to the server configuration.
             </p>
             <div class="sgroup-head">Safety</div>
             <label class="srow">
@@ -1221,6 +1222,8 @@
                 </button>
               </div>
             </div>
+          {:else if section === 'server'}
+            <ServerSettings />
           {:else if section === 'about'}
             <h3 class="section-head">About</h3>
             <p class="section-hint">
