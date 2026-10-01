@@ -1,3 +1,4 @@
+#![cfg(unix)]
 //! Integration tests — POC Gate #1~#5 + multi-pane + late-attach.
 //!
 //! Reference: docs/reports/0023-pty-poc-verification-and-decision.md §1.2
@@ -496,6 +497,7 @@ async fn activity_is_observed_without_output_subscribers() {
 
 /// Shutdown must work even while the Hub or embedder retains backend handles.
 #[test]
+#[cfg(unix)]
 fn explicit_shutdown_reaps_and_fences_late_spawns() {
     let backend = gtmux_pty_backend::PtyBackend::new();
     let mut spec = gtmux_pty_backend::SpawnSpec::default_shell();
@@ -512,6 +514,7 @@ fn explicit_shutdown_reaps_and_fences_late_spawns() {
 }
 
 #[test]
+#[cfg(unix)]
 fn concurrent_spawn_cannot_escape_shutdown() {
     let backend = gtmux_pty_backend::PtyBackend::new();
     let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));

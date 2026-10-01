@@ -1525,10 +1525,13 @@ async fn handle_client_envelope(
                     // SAFETY: libc::raise with a constant signal number is
                     // sound. Process self-signal is the canonical way to
                     // trigger graceful shutdown matching external SIGTERM.
+                    #[cfg(unix)]
                     #[allow(unsafe_code)]
                     unsafe {
                         libc::raise(libc::SIGTERM);
                     }
+                    #[cfg(windows)]
+                    let _ = gtmux_platform::request_stop(std::process::id() as i32);
                 }
                 CtrlOutcome::NotAllowed => {
                     let body = payload::encode_ctrl_error(
@@ -2553,7 +2556,7 @@ bind = "127.0.0.1"
         let mut pane_ids = Vec::with_capacity(pane_count);
         for _ in 0..pane_count {
             let spec = gtmux_pty_backend::SpawnSpec {
-                command: Some("/bin/sh".into()),
+                command: Some(if cfg!(windows) { "cmd.exe" } else { "/bin/sh" }.into()),
                 args: vec![],
                 cwd: None,
                 env: vec![

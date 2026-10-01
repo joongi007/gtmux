@@ -172,6 +172,22 @@ pub(crate) async fn preview(Json(body): Json<Preview>) -> Response {
     let mut doc = match body.contents.parse::<toml_edit::DocumentMut>() {
         Ok(doc) => doc, Err(e) => return error(StatusCode::BAD_REQUEST, e.to_string()),
     };
+    let old_port = doc["server"]["port"].as_integer();
+    if doc.get("public_origin").and_then(|v| v.as_str()).is_some() {
+        if let Some(old) = old_port {
+            for key in ["host_allowlist", "cors_origins"] {
+                if let Some(values) = doc.get_mut("security").and_then(|v| v.get_mut(key)).and_then(|v| v.as_array_mut()) {
+                    for value in values.iter_mut() {
+                        if let Some(text) = value.as_str() {
+                            for host in ["127.0.0.1", "localhost", "http://127.0.0.1", "http://localhost"] {
+                                if text == format!("{host}:{old}") { *value = toml_edit::Value::from(format!("{host}:{}", body.port)); break; }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
     doc["server"]["port"] = toml_edit::value(i64::from(body.port));
     for (key, value) in [("server_workspace", body.server_workspace), ("default_session_workspace", body.default_session_workspace)] {
         if value.is_empty() { doc.remove(key); } else { doc[key] = toml_edit::value(value); }
@@ -270,6 +286,7 @@ mod tests {
     }
     #[cfg(unix)]
     #[test]
+    #[cfg(unix)]
     fn readonly_file_reports_failure_and_symlink_is_rejected() {
         use std::os::unix::fs::{PermissionsExt, symlink};
         let dir = tempfile::tempdir().unwrap();

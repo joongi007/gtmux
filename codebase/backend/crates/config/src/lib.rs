@@ -125,6 +125,10 @@ impl Default for BehaviorSettings {
 pub struct Config {
     /// 본 파일이 따르는 schema 버전. `SCHEMA_VERSION`과 일치해야 한다.
     pub schema_version: u32,
+    /// Explicit HTTPS origin for a loopback server behind a trusted local proxy.
+    /// Enables cloud authentication policy without exposing the backend listener.
+    #[serde(default)]
+    pub public_origin: Option<String>,
     /// 서버 identity (session·port·bind). ADR-0007 1:1:1.
     pub server: ServerConfig,
     /// 런타임 튜닝 값. 기본은 모두 SSoT가 정한 안전한 값.
@@ -455,6 +459,7 @@ DefaultsSeed {
         auth: AuthConfig::default(),
         assets: AssetsConfig::default(),
         behavior: BehaviorSettings::default(),
+        public_origin: None,
     }
 }
 
@@ -523,6 +528,7 @@ max_size_bytes = 52428800
 /// 잡아내도록 한다.
 #[derive(Debug, Clone, Serialize)]
 struct DefaultsSeed {
+    public_origin: Option<String>,
     schema_version: u32,
     server: ServerSeed,
     runtime: RuntimeConfig,
@@ -632,9 +638,28 @@ fn validate(cfg: &Config) -> Result<(), ConfigError> {
         ));
     }
 
+    if let Some(origin) = &cfg.public_origin {
+        let host = origin.strip_prefix("https://").ok_or_else(|| ConfigError::Validation("public_origin must be an HTTPS origin".into()))?;
+        if host.is_empty() || host.len() > 253 || host.contains(['/', '@', '?', '#', ':'])
+            || !host.split('.').all(|label| !label.is_empty() && label.len() <= 63 && !label.starts_with('-') && !label.ends_with('-')
+                && label.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')) {
+            return Err(ConfigError::Validation("public_origin must contain a DNS hostname with no path, credentials or port".into()));
+        }
+        if !matches!(derive_mode(&cfg.server.bind), Mode::Local) || cfg.server.bind != "127.0.0.1" {
+            return Err(ConfigError::Validation("public_origin requires the managed IPv4 loopback backend".into()));
+        }
+        if !cfg.security.cors_origins.contains(origin) || !cfg.security.host_allowlist.iter().any(|h| h == host) {
+            return Err(ConfigError::Validation("public_origin must be explicitly allowed in security CORS and Host lists".into()));
+        }
+        let Some(cloud) = &cfg.cloud else { return Err(ConfigError::Validation("public_origin requires cloud proxy policy".into())); };
+        if cloud.tls_required || cloud.trusted_proxy_ips != ["127.0.0.1/32"] {
+            return Err(ConfigError::Validation("public_origin requires proxy TLS termination and only the local proxy address 127.0.0.1/32".into()));
+        }
+    }
+
     // mode-section 정합. cloud 모드는 cloud 섹션이 필요하다. TLS 를 요구하는
     // 기본 경로에서는 cert/key marker 도 명시되어야 lifecycle 검증으로 이어진다.
-    let mode = derive_mode(&cfg.server.bind);
+    let mode = cfg.mode();
     match (mode, &cfg.cloud) {
         (Mode::Cloud, None) => {
             return Err(ConfigError::ModeMismatch(format!(
@@ -672,14 +697,14 @@ fn validate(cfg: &Config) -> Result<(), ConfigError> {
 impl Config {
     /// `bind` 값에서 추론한 mode.
     pub fn mode(&self) -> Mode {
-        derive_mode(&self.server.bind)
+        if self.public_origin.is_some() { Mode::Cloud } else { derive_mode(&self.server.bind) }
     }
 
     /// Cloud mode 에서 TLS 보안 속성을 적용해야 하는지 여부.
     /// Local mode 는 항상 `false`; Cloud mode 는 `[cloud].tls_required` 기본값 `true`.
     pub fn tls_required(&self) -> bool {
-        matches!(self.mode(), Mode::Cloud)
-            && self.cloud.as_ref().map(|c| c.tls_required).unwrap_or(true)
+        self.public_origin.is_some() || (matches!(self.mode(), Mode::Cloud)
+            && self.cloud.as_ref().map(|c| c.tls_required).unwrap_or(true))
     }
 
     /// `host_allowlist`가 비어 있으면 bind 호스트를 보강해 반환한다 — SSoT §5
@@ -693,7 +718,7 @@ impl Config {
         // bind가 loopback이면 통상의 3종 세트를 합성. cloud/외부 bind는 사용자
         // 명시가 강제이므로 빈 셋 그대로 반환 — startup이 거부할 것.
         let port = self.server.port;
-        match derive_mode(&self.server.bind) {
+        match self.mode() {
             Mode::Local => vec![
                 format!("127.0.0.1:{port}"),
                 format!("localhost:{port}"),
@@ -1268,5 +1293,37 @@ cors_origins = ["http://example.test:8443", "http://127.0.0.1:9001"]
         let parsed: Config = ::toml::from_str(&filled).expect("defaults_toml parses");
         assert_eq!(parsed.schema_version, SCHEMA_VERSION);
         assert_eq!(parsed.server.session, "demo");
+    }
+}
+
+#[cfg(test)]
+mod proxy_tests {
+    use super::*;
+    const PROXY: &str = r#"schema_version=1
+public_origin="https://terminal.example.com"
+[server]
+session="test"
+port=19091
+bind="127.0.0.1"
+[security]
+host_allowlist=["terminal.example.com", "127.0.0.1:19091"]
+cors_origins=["https://terminal.example.com"]
+[cloud]
+tls_required=false
+trusted_proxy_ips=["127.0.0.1/32"]
+rate_limit_auth_failures_per_minute=10
+"#;
+    #[test]
+    fn loopback_public_origin_enables_cloud_and_secure_cookies() {
+        let cfg = parse_document(PROXY).unwrap();
+        assert_eq!(cfg.mode(), Mode::Cloud);
+        assert!(cfg.tls_required());
+    }
+    #[test]
+    fn public_origin_requires_narrow_proxy_and_exact_origin() {
+        for bad in [PROXY.replace("https://", "http://"), PROXY.replace("127.0.0.1/32", "0.0.0.0/0"),
+            PROXY.replace("bind=\"127.0.0.1\"", "bind=\"0.0.0.0\""), PROXY.replacen("terminal.example.com", "other.example.com", 1)] {
+            assert!(parse_document(&bad).is_err());
+        }
     }
 }

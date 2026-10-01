@@ -82,6 +82,7 @@ mod tests {
             auth: gtmux_config::AuthConfig::default(),
             assets: gtmux_config::AssetsConfig::default(),
             behavior: gtmux_config::BehaviorSettings::default(),
+        public_origin: None,
         };
         let dir = tempfile::TempDir::new().unwrap();
         let wm = WorkspaceManager::from_path(dir.path().to_path_buf()).unwrap();

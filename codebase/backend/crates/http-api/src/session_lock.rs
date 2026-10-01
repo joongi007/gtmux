@@ -25,6 +25,7 @@
 
 use std::fs::{File, OpenOptions};
 use std::io::{Seek, SeekFrom, Write};
+#[cfg(unix)]
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -32,7 +33,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use fs2::FileExt;
+
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tracing::{debug, warn};
@@ -162,7 +163,7 @@ impl LockGuard {
             // unlock_safely() is infallible on Drop — see `fs2` semantics:
             // FileExt::unlock returns io::Result but a panic-during-drop is
             // worse than a leaked descriptor for a process that's exiting.
-            if let Err(e) = FileExt::unlock(&file) {
+            if let Err(e) = gtmux_platform::unlock(&file) {
                 warn!(error = %e, path = %self.path.display(), "session_lock: flock release failed");
             }
             drop(file);
@@ -194,15 +195,16 @@ pub fn acquire(
     let mut opts = OpenOptions::new();
     opts.read(true)
         .write(true)
-        .create(true)
-        .mode(LOCK_FILE_MODE);
+        .create(true);
+    #[cfg(unix)]
+    opts.mode(LOCK_FILE_MODE);
     let mut file = opts.open(&path)?;
 
-    match FileExt::try_lock_exclusive(&file) {
+    match gtmux_platform::lock(&file, true) {
         Ok(_) => {}
         Err(e) => {
             // fs2 returns std::io::Error with kind WouldBlock for contention.
-            if e.kind() == std::io::ErrorKind::WouldBlock {
+            if e.kind() == std::io::ErrorKind::WouldBlock || e.raw_os_error() == fs2::lock_contended_error().raw_os_error() {
                 return Err(LockError::Contended);
             }
             return Err(LockError::Io(e));
@@ -221,7 +223,7 @@ pub fn acquire(
     if let Err(e) = write_lease_body(&mut file, &lease) {
         // Body write failed — release the flock and propagate so the caller
         // doesn't end up with a held lock and a confused modal hint.
-        let _ = FileExt::unlock(&file);
+        let _ = gtmux_platform::unlock(&file);
         return Err(e);
     }
     debug!(
@@ -248,17 +250,17 @@ pub fn peek(locks_dir: &Path, name: &str) -> LockState {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return LockState::Vacant,
         Err(e) => {
             warn!(error = %e, path = %path.display(), "session_lock: peek open failed");
-            return LockState::Vacant;
+            return LockState::InUseRaceyBody;
         }
     };
-    match FileExt::try_lock_shared(&file) {
+    match gtmux_platform::lock(&file, false) {
         Ok(_) => {
             // SH succeeded → no exclusive holder. Treat as stale (the holder
             // crashed). Caller may unlink + re-acquire.
-            let _ = FileExt::unlock(&file);
+            let _ = gtmux_platform::unlock(&file);
             if file.metadata().map(|m| m.len() == 0).unwrap_or(false) { LockState::Vacant } else { LockState::Stale }
         }
-        Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+        Err(e) if e.kind() == std::io::ErrorKind::WouldBlock || e.raw_os_error() == fs2::lock_contended_error().raw_os_error() => {
             // Someone holds EX. Try to parse the body for the diagnostic.
             match read_lease_body(&path) {
                 Ok(lease) => LockState::InUse(lease),
@@ -267,7 +269,7 @@ pub fn peek(locks_dir: &Path, name: &str) -> LockState {
         }
         Err(e) => {
             warn!(error = %e, path = %path.display(), "session_lock: peek flock failed");
-            LockState::Vacant
+            LockState::InUseRaceyBody
         }
     }
 }
@@ -326,9 +328,9 @@ pub fn unlink_stale(locks_dir: &Path, name: &str) -> std::io::Result<()> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
         Err(e) => return Err(e),
     };
-    FileExt::try_lock_exclusive(&file)?;
+    gtmux_platform::lock(&file, true)?;
     file.set_len(0)?;
-    FileExt::unlock(&file)
+    gtmux_platform::unlock(&file)
 }
 
 /// Boot-time housekeeping: walk every session record in `wm` and peek its
@@ -415,9 +417,9 @@ mod tests {
         let preopened = OpenOptions::new().read(true).write(true).open(first.path()).unwrap();
         assert!(unlink_stale(dir, "same").is_err());
         first.release();
-        FileExt::try_lock_exclusive(&preopened).unwrap();
+        gtmux_platform::lock(&preopened, true).unwrap();
         assert!(matches!(acquire(dir, "same", Arc::from("two"), "other"), Err(LockError::Contended)));
-        FileExt::unlock(&preopened).unwrap();
+        gtmux_platform::unlock(&preopened).unwrap();
         assert!(acquire(dir, "same", Arc::from("two"), "other").is_ok());
     }
 

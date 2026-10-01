@@ -751,6 +751,7 @@ mod tests {
             auth: gtmux_config::AuthConfig::default(),
             assets: gtmux_config::AssetsConfig::default(),
             behavior: gtmux_config::BehaviorSettings::default(),
+        public_origin: None,
         };
         let state = AppState::new(cfg, token.clone());
         (state, token)

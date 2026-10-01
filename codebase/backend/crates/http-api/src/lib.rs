@@ -327,7 +327,7 @@ impl AppState {
             // empty and is populated by `with_workspace` (it needs the Store
             // dir). No IO/canonicalize here — boot wiring does the real resolve.
             server_workspace: Arc::new(
-                std::env::var_os("HOME")
+                gtmux_platform::home()
                     .map(std::path::PathBuf::from)
                     .unwrap_or_else(|| std::path::PathBuf::from("/")),
             ),
@@ -1235,8 +1235,9 @@ pub const COOKIE_NAME_STR: &str = "gtmux_auth";
 //  Handlers
 // ─────────────────────────────────────────────────────────────────────────────
 
-async fn healthz_handler() -> Response {
+async fn healthz_handler(State(state): State<AppState>) -> Response {
     let mut resp = Json(json!({ "ok": true })).into_response();
+    if let Ok(value) = state.server_id.parse() { resp.headers_mut().insert("x-gtmux-server-id", value); }
     apply_security_headers(resp.headers_mut(), Mode::Local /* harmless */);
     resp
 }
@@ -1424,6 +1425,7 @@ mod tests {
             auth: gtmux_config::AuthConfig::default(),
             assets: gtmux_config::AssetsConfig::default(),
             behavior: gtmux_config::BehaviorSettings::default(),
+        public_origin: None,
         }
     }
 
@@ -6047,7 +6049,7 @@ mod tests {
         let app = router_with_state(state.clone());
 
         let marker = "GTMUX_ADR0054_MARKER";
-        let line = format!("echo {marker}\n");
+        let line = format!("echo {marker}{}", if cfg!(windows) { "\r" } else { "\n" });
         let b64 = base64::engine::general_purpose::STANDARD.encode(&line);
         let resp = app
             .clone()
@@ -7012,13 +7014,13 @@ mod tests {
             .insert(cookie_value.to_string(), "refresh".to_string());
 
         let path = locks_dir.join("refresh.lock");
-        let lease_before: serde_json::Value =
+        let mut lease_before: serde_json::Value =
             serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        lease_before["lease_until_unix"] = json!(0);
+        std::fs::write(&path, serde_json::to_vec(&lease_before).unwrap()).unwrap();
         let before_until = lease_before["lease_until_unix"].as_u64().unwrap();
 
-        // Sleep past the 1s resolution of unix-seconds so the new lease
-        // can demonstrably differ.
-        tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
+        // An expired diagnostic value avoids dependence on wall-clock jumps.
         state.refresh_lease_for_owner(cookie_value).await;
 
         let lease_after: serde_json::Value =
@@ -8867,6 +8869,7 @@ mod tests {
     /// 400 not_a_file (symlinks are refused lexically, before canonicalize
     /// would follow them — the link target stays untouched).
     #[tokio::test]
+    #[cfg(unix)]
     async fn fs_file_write_rejects_directory_and_symlink() {
         let dir = tempfile::TempDir::new().unwrap();
         let (app, token, _) = make_app_with_workspace(&dir);
@@ -9021,6 +9024,7 @@ mod tests {
     /// creation fail → 500 write_failed, the target keeps its old content,
     /// and no temp file is left behind.
     #[tokio::test]
+    #[cfg(unix)]
     async fn fs_file_write_failure_leaves_old_content_and_no_temp() {
         use std::os::unix::fs::PermissionsExt;
 
@@ -9797,6 +9801,7 @@ mod tests {
 
     #[cfg(unix)]
     #[tokio::test]
+    #[cfg(unix)]
     async fn fs_copy_directory_with_symlink_rejected_no_partial() {
         use std::os::unix::fs::symlink;
         let dir = tempfile::TempDir::new().unwrap();
@@ -10124,6 +10129,7 @@ mod tests {
 
     #[cfg(unix)]
     #[tokio::test]
+    #[cfg(unix)]
     async fn fs_move_rejects_symlink_source_and_descendant() {
         use std::os::unix::fs::symlink;
         let dir = tempfile::TempDir::new().unwrap();
@@ -10198,12 +10204,13 @@ mod tests {
     async fn create_rejects_workspace_root_outside_a() {
         let dir = tempfile::TempDir::new().unwrap();
         let (app, token, _store) = make_app_with_workspace(&dir);
+        let outside = tempfile::tempdir().unwrap();
         let (status, body) = authed_json(
             &app,
             &token,
             Method::POST,
             "/api/sessions",
-            Some(json!({ "name": "escape", "workspace_root": "/etc", "confirm": true })),
+            Some(json!({ "name": "escape", "workspace_root": outside.path(), "confirm": true })),
         )
         .await;
         assert_eq!(status, StatusCode::BAD_REQUEST);

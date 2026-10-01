@@ -46,7 +46,7 @@ use gtmux_auth::{
     issue_token, load_token, rotate_token, save_token, shared_token, AuthError, SharedToken,
     TokenString,
 };
-use gtmux_config::{derive_mode, load_with_overrides as load_config, Config, Mode};
+use gtmux_config::{load_with_overrides as load_config, Config, Mode};
 use gtmux_pty_backend::PtyBackend;
 use gtmux_ws_server::Hub;
 use state_files::{
@@ -54,6 +54,7 @@ use state_files::{
     PidLiveness, StateFileError, StopOutcome, TeardownOpts, TeardownReport,
 };
 use tokio::net::TcpListener;
+#[cfg(unix)]
 use tokio::signal::unix::{signal, SignalKind};
 use tracing::{error, info, warn};
 
@@ -505,7 +506,7 @@ async fn start(args: StartArgs) -> anyhow::Result<ExitCode> {
 
     // 3) mode is *derived* from `bind`; we capture it so subsequent code can
     //    branch (token policy, future TLS/CSP) without re-parsing.
-    let mode = derive_mode(&config.server.bind);
+    let mode = config.mode();
 
     // 4) tracing — explicit, JSON when piped or asked, ANSI text on a tty.
     init_tracing(&config);
@@ -962,7 +963,8 @@ fn build_router(
         .config
         .frontend_dist
         .as_deref()
-        .map(|p| p.to_path_buf());
+        .map(|p| p.to_path_buf())
+        .or_else(|| std::env::current_exe().ok()?.parent().map(|p| p.join("frontend")).filter(|p| p.join("index.html").is_file()));
     let http = gtmux_http_api::router_with_app_state(app_state, frontend_dist.as_deref());
     // ADR-0020 D18.3 (T1): the ws-server router stores an `Arc::clone` of the
     // *same* shared token cell the http-api AppState holds.
@@ -1107,6 +1109,7 @@ async fn wait_for_stop_request(rx: &mut tokio::sync::watch::Receiver<bool>) {
     let _ = rx.wait_for(|requested| *requested).await;
 }
 
+#[cfg(unix)]
 async fn wait_for_shutdown() {
     // Per-signal handles must be created *before* we race on them. If
     // `signal()` fails we fall back to listening on whichever did succeed.
@@ -1168,7 +1171,7 @@ impl std::error::Error for BindError {}
 enum StartError {
     AlreadyRunning {
         instance: String,
-        pid: libc::pid_t,
+        pid: i32,
     },
     /// ADR-0014 D10 amend (2026-05-14) — `TMUX` env detected, refuse to start
     /// inside an outer tmux session. The variant carries the env value so
@@ -1308,7 +1311,7 @@ async fn teardown_cmd(args: TeardownArgs) -> ExitCode {
 /// Stdin-driven confirmation prompt. Returns `true` when the user typed
 /// `yes` (case-insensitive). Non-TTY callers see an instruction line and
 /// a `false` return.
-fn confirm_teardown(instance: &str, pid: libc::pid_t) -> bool {
+fn confirm_teardown(instance: &str, pid: i32) -> bool {
     if !std::io::stdin().is_terminal() || !std::io::stderr().is_terminal() {
         eprintln!(
             "gtmux teardown: refusing to proceed without confirmation \
@@ -1676,7 +1679,7 @@ fn config_dir_for_humanise() -> Option<PathBuf> {
             return Some(p.join("gtmux"));
         }
     }
-    let home = std::env::var_os("HOME")?;
+    let home = gtmux_platform::home()?;
     Some(PathBuf::from(home).join(".config").join("gtmux"))
 }
 
@@ -1745,7 +1748,7 @@ fn status_state_dir() -> Option<PathBuf> {
             return Some(p.join("gtmux"));
         }
     }
-    let home = std::env::var_os("HOME")?;
+    let home = gtmux_platform::home()?;
     Some(
         PathBuf::from(home)
             .join(".local")
@@ -1851,6 +1854,7 @@ enum TokenStatus {
     Missing,
 }
 
+#[cfg(unix)]
 fn check_token_perm(instance: &str) -> TokenStatus {
     let Some(state_dir) = status_state_dir() else {
         return TokenStatus::Missing;
@@ -1859,6 +1863,7 @@ fn check_token_perm(instance: &str) -> TokenStatus {
     let Ok(meta) = std::fs::metadata(&token_path) else {
         return TokenStatus::Missing;
     };
+    #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
     let mode = meta.permissions().mode() & 0o777;
     if mode == 0o600 {
@@ -2200,16 +2205,17 @@ fn session_import(
 /// server is writing the same file.
 fn write_session_file_0600(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
     use std::io::Write;
+    #[cfg(unix)]
     use std::os::unix::fs::OpenOptionsExt;
     let dir = path.parent().unwrap_or_else(|| std::path::Path::new("."));
     let tmp = dir.join(format!(".gtmux-import-{}.tmp", std::process::id()));
     {
-        let mut f = std::fs::OpenOptions::new()
-            .create(true)
-            .write(true)
-            .truncate(true)
-            .mode(0o600)
-            .open(&tmp)?;
+        let mut options = std::fs::OpenOptions::new();
+        options.create_new(true).write(true);
+        #[cfg(unix)]
+        options.mode(0o600);
+        gtmux_platform::private_dir(dir)?;
+        let mut f = options.open(&tmp)?;
         f.write_all(bytes)?;
         f.sync_all()?;
     }
@@ -2580,7 +2586,7 @@ mod tests {
         fn new() -> Self {
             let lock = CLI_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
             let prev_state = std::env::var_os("XDG_STATE_HOME");
-            let prev_home = std::env::var_os("HOME");
+            let prev_home = gtmux_platform::home();
             let state_dir = tempfile::tempdir().expect("state tempdir");
             let home_dir = tempfile::tempdir().expect("home tempdir");
             std::env::set_var("XDG_STATE_HOME", state_dir.path());
@@ -2628,8 +2634,10 @@ mod tests {
     /// exist) must succeed (exit 0) and remove the stale file so the
     /// next `gtmux start` sees a clean `Absent` state.
     #[tokio::test]
+    #[cfg(unix)]
     async fn stop_stale_pidfile_succeeds() {
         use std::io::Write;
+        #[cfg(unix)]
         use std::os::unix::fs::PermissionsExt;
         let _g = CliXdgGuard::new();
         let session = "stale-cli";
@@ -2641,7 +2649,7 @@ mod tests {
         )
         .unwrap();
         let mut f = std::fs::File::create(&path).unwrap();
-        writeln!(f, "{}", libc::pid_t::MAX).unwrap();
+        writeln!(f, "{}", i32::MAX).unwrap();
         drop(f);
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
         let code = stop(session, false).await;
@@ -2693,4 +2701,23 @@ mod lifecycle_tests {
         result.recv_timeout(std::time::Duration::from_secs(1)).expect("watch read lock released");
         writer.join().unwrap();
     }
+}
+
+#[cfg(windows)]
+async fn wait_for_shutdown() {
+    // Dedicated thread: an unused blocking-pool wait would prevent runtime exit.
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    std::thread::spawn(move || { let _ = tx.send(gtmux_platform::wait_stop()); });
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => {},
+        _ = rx => {},
+    }
+}
+
+#[cfg(windows)]
+fn check_token_perm(instance: &str) -> TokenStatus {
+    let Some(dir) = status_state_dir() else { return TokenStatus::Missing; };
+    let path = dir.join(format!("{instance}.token"));
+    if !path.exists() { return TokenStatus::Missing; }
+    if gtmux_platform::check_private(&path, 0o600).is_ok() { TokenStatus::Ok } else { TokenStatus::BadPerm }
 }

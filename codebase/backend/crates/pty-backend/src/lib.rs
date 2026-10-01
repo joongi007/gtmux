@@ -49,6 +49,8 @@ use activity::ActivityTracker;
 use tokio::sync::{broadcast, mpsc};
 use tracing::{debug, info, warn};
 
+#[cfg(any(windows, test))]
+mod conpty_handshake;
 pub mod activity;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -281,7 +283,9 @@ struct PaneHandle {
     in_tx: Option<mpsc::UnboundedSender<Vec<u8>>>,
     /// PTY master clone, owned for ioctl (resize) only. Reader / writer
     /// halves are *moved* into background threads at spawn time.
-    master: Arc<StdMutex<Box<dyn MasterPty + Send>>>,
+    master: Option<Arc<StdMutex<Box<dyn MasterPty + Send>>>>,
+    #[cfg(windows)]
+    job: Option<gtmux_platform::ChildJob>,
     /// Child process handle. Locked only by the wait thread + the kill
     /// path (signal delivery). Both call sites hold the lock briefly;
     /// no `.await` lives inside the critical section.
@@ -498,6 +502,14 @@ impl Drop for PaneHandle {
         //    is still alive inside `self`.
         drop(self.in_tx.take());
 
+        #[cfg(windows)]
+        {
+            drop(self.job.take());
+            // Close ConPTY while its output reader is still draining. Holding
+            // the pseudoconsole until after reader.join can deadlock on EOF.
+            drop(self.master.take());
+        }
+
         // 2) SIGTERM, then grace, then SIGKILL.
         terminate_child(&self.child);
 
@@ -519,6 +531,7 @@ impl Drop for PaneHandle {
 /// way or another.
 fn terminate_child(child_mutex: &StdMutex<Box<dyn Child + Send + Sync>>) {
     // SIGTERM phase.
+    #[cfg(unix)]
     if let Ok(child) = child_mutex.lock() {
         // portable-pty's `Child::kill` sends SIGKILL on Unix — we want
         // SIGTERM first. Reach into the platform child via `process_id`.
@@ -554,10 +567,12 @@ fn terminate_child(child_mutex: &StdMutex<Box<dyn Child + Send + Sync>>) {
 /// `libc::kill` wrapper. We isolate the FFI to a single non-`unsafe`-fn
 /// boundary so the crate's `forbid(unsafe_code)` stays clean — the
 /// actual `unsafe` block lives in a child module.
+#[cfg(unix)]
 fn unsafe_send_signal(pid: libc::pid_t, sig: libc::c_int) -> i32 {
     sigsend::kill(pid, sig)
 }
 
+#[cfg(unix)]
 mod sigsend {
     //! Tiny FFI shim. Isolated so the crate-level
     //! `#![forbid(unsafe_code)]` stays effective — only this module
@@ -760,7 +775,7 @@ impl PtyBackend {
             .panes
             .get(&id)
             .ok_or(PtyBackendError::PaneNotFound(id))?;
-        let master = handle.master.clone();
+        let master = handle.master.as_ref().expect("live pane owns master").clone();
         // Drop the dashmap shard guard before locking the master mutex
         // to avoid holding two locks simultaneously.
         drop(handle);
@@ -874,6 +889,7 @@ impl PtyBackendInner {
         }
         info!(panes = self.panes.len(), "pty-backend: tearing down");
         // SIGTERM phase — fan out without blocking.
+        #[cfg(unix)]
         for entry in self.panes.iter() {
             if let Ok(child) = entry.value().child.lock() {
                 if let Some(pid) = child.process_id() {
@@ -939,8 +955,8 @@ fn spawn_inner(
     let shell = spec
         .command
         .clone()
-        .or_else(|| std::env::var("SHELL").ok())
-        .unwrap_or_else(|| "/bin/bash".to_string());
+        .or_else(|| std::env::var(if cfg!(windows) { "COMSPEC" } else { "SHELL" }).ok())
+        .unwrap_or_else(|| if cfg!(windows) { "cmd.exe".to_string() } else { "/bin/bash".to_string() });
     let mut cmd = CommandBuilder::new(&shell);
     for a in &spec.args {
         cmd.arg(a);
@@ -950,7 +966,7 @@ fn spawn_inner(
     // with the POC by falling back explicitly.
     if let Some(cwd) = spec.cwd.as_ref() {
         cmd.cwd(cwd);
-    } else if let Some(home) = std::env::var_os("HOME") {
+    } else if let Some(home) = gtmux_platform::home() {
         cmd.cwd(home);
     }
 
@@ -986,11 +1002,16 @@ fn spawn_inner(
         cmd.env(k, v);
     }
 
-    let child = pair
+    let mut child = pair
         .slave
         .spawn_command(cmd)
         .map_err(|e| PtyBackendError::SpawnFailed(anyhow::anyhow!(e)))?;
     drop(pair.slave);
+    #[cfg(windows)]
+    let job = match child.as_raw_handle().ok_or_else(|| std::io::Error::other("ConPTY child handle unavailable")).and_then(gtmux_platform::ChildJob::attach) {
+        Ok(job) => job,
+        Err(error) => { let _ = child.kill(); return Err(PtyBackendError::SpawnFailed(error.into())); }
+    };
 
     // Split the master fd into a reader handle + writer handle, plus
     // a clone for resize ioctl.
@@ -1018,10 +1039,14 @@ fn spawn_inner(
     let ring_reader = ring.clone();
     let activity_reader = activity.clone();
     let stall_reader = stall.clone();
+    #[cfg(windows)]
+    let conpty_input = in_tx.clone();
     let reader_join = std::thread::Builder::new()
         .name(format!("pty-reader-{}", id.0))
         .spawn(move || {
             let mut buf = [0u8; READ_CHUNK];
+            #[cfg(windows)]
+            let mut handshake = conpty_handshake::CursorHandshake::default();
             loop {
                 match reader.read(&mut buf) {
                     Ok(0) => {
@@ -1029,14 +1054,23 @@ fn spawn_inner(
                         break;
                     }
                     Ok(n) => {
+                        #[cfg(windows)]
+                        let (output, reply) = handshake.feed(&buf[..n]);
+                        #[cfg(windows)]
+                        if reply { let _ = conpty_input.send(b"\x1b[1;1R".to_vec()); }
+                        #[cfg(windows)]
+                        let bytes = output.as_slice();
+                        #[cfg(not(windows))]
+                        let bytes = &buf[..n];
+                        if bytes.is_empty() { continue; }
                         // Update the ring buffer *before* the broadcast
                         // so a late attach that arrives between the two
                         // operations still sees the bytes.
-                        PaneHandle::ring_append(&ring_reader, &buf[..n]);
+                        PaneHandle::ring_append(&ring_reader, bytes);
                         if let Ok(mut tracker) = activity_reader.lock() {
-                            tracker.output(&buf[..n], std::time::Instant::now());
+                            tracker.output(bytes, std::time::Instant::now());
                         }
-                        let chunk = Bytes::copy_from_slice(&buf[..n]);
+                        let chunk = Bytes::copy_from_slice(bytes);
                         if out_tx_reader.send(chunk).is_err() {
                             // No subscribers OR every subscriber is
                             // lagged past cap. Increment the
@@ -1145,7 +1179,9 @@ fn spawn_inner(
     let handle = Arc::new(PaneHandle {
         out_tx,
         in_tx: Some(in_tx),
-        master,
+        master: Some(master),
+        #[cfg(windows)]
+        job: Some(job),
         child,
         ring,
         activity,
@@ -1168,6 +1204,7 @@ fn spawn_inner(
 /// `ExitStatus::exit_code`. portable-pty packs both into the same byte
 /// the way `waitpid` does on Unix: low 7 bits = signal if non-zero,
 /// otherwise high 8 bits = exit code.
+#[cfg(unix)]
 fn exit_code_signal(exit_code: u32) -> (Option<i32>, Option<i32>) {
     // Mimic POSIX W* macros so the FE can tell "exit 0" from
     // "killed by SIGTERM 15".
@@ -1218,6 +1255,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn backend_command_new_pane_round_trip() {
         let cmd = BackendCommand::NewPane {
             request_id: Some("req-1".to_string()),
@@ -1311,6 +1349,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn exit_code_signal_normal_exit() {
         // exit 0 — low 7 bits zero, high byte zero
         assert_eq!(exit_code_signal(0), (Some(0), None));
@@ -1319,6 +1358,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn exit_code_signal_killed_by_signal() {
         // SIGTERM = 15
         assert_eq!(exit_code_signal(15), (None, Some(15)));
@@ -1443,3 +1483,6 @@ mod tests {
         assert_eq!(find_clear_cut(b"\x1b[3", b"Jx\x1b[3Jy"), Some(2));
     }
 }
+
+#[cfg(windows)]
+fn exit_code_signal(exit_code: u32) -> (Option<i32>, Option<i32>) { (Some(exit_code as i32), None) }
