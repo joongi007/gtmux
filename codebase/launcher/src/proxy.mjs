@@ -32,6 +32,7 @@ export class ProxyManager {
   }
   async status() { return { installed: Boolean(await readOptional(join(this.root, 'version'))),
     running: Boolean(this.child), error: this.error, version: CADDY_VERSION,
+    lastSettings: JSON.parse(await readOptional(join(this.root, 'last-settings.json')) ?? 'null'),
     configuration: JSON.parse(await readOptional(join(this.root, 'exposure.json')) ?? 'null') }; }
   async install() {
     if (this.busy) throw new Error('A proxy operation is already in progress.');
@@ -114,6 +115,7 @@ export class ProxyManager {
         httpPort: plan.httpPort, httpsPort: plan.httpsPort, appliedRevision: revision(plan.after) }));
       await this.server.start();
       if (plan.mode === 'managed') await this.start();
+      await atomicWrite(join(this.root, 'last-settings.json'), JSON.stringify({ domain: plan.domain, mode: plan.mode, httpPort: plan.httpPort, httpsPort: plan.httpsPort }));
       this.plan = null; return this.status();
     } catch (error) {
       try {
@@ -169,6 +171,8 @@ export class ProxyManager {
     const current = await readFile(this.server.configPath, 'utf8');
     if (revision(current) !== exposure.appliedRevision) throw new Error('Config was edited after deployment. Restore the saved server.before.toml manually to preserve your edits.');
     const before = await readFile(join(this.root, 'server.before.toml'), 'utf8');
+    const { domain, mode, httpPort = 80, httpsPort = 443 } = exposure;
+    await atomicWrite(join(this.root, 'last-settings.json'), JSON.stringify({ domain, mode, httpPort, httpsPort }));
     await this.server.stop(credential); await this.stop();
     await atomicWrite(this.server.configPath, before); await atomicWrite(join(this.root, 'exposure.json'), 'null');
     await this.server.start(); return this.status();

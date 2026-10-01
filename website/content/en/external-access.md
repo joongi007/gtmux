@@ -29,3 +29,7 @@ A failed deployment attempts to restore the prior configuration. Read the report
 ## Reference
 
 [Caddy automatic HTTPS](https://caddyserver.com/docs/automatic-https) describes certificate issuance and renewal. Existing gateway/subpath deployments remain separate from this root-origin wizard.
+
+## Turn HTTPS off and on again
+
+Use the External HTTPS switch in the manager’s External access section. Turning it off asks for confirmation before restarting the server and restoring the original local configuration. Caddy stays installed and the last domain, proxy mode and ports are remembered, without storing your password. To enable it again, turn the switch on, review the saved fields, and choose Apply and restart. The switch stays off until the configuration is applied. An enabled switch means configured, not verified public connectivity; use Verify public HTTPS to check reachability. An existing external proxy remains under its owner’s control.

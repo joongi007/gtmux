@@ -58,3 +58,27 @@ test('rollback preserves concurrent external edits and public URL requires succe
   manager.verify = async () => ({ verified: true });
   assert.equal(await manager.workspaceURL(), 'https://terminal.example.com/auth/bootstrap?token=secret');
 });
+
+
+test('disabling HTTPS preserves reusable settings across manager launches without retaining credentials', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'gtmux-proxy-toggle-')); t.after(() => rm(root, { recursive: true, force: true }));
+  const configPath = join(root, 'server.toml');
+  const original = '[server]\nsession="desktop"\nport=19091\nbind="127.0.0.1"\n';
+  await writeFile(configPath, original);
+  const server = { root, configPath, serverPath: async p => p, stop: async () => {}, start: async () => {} };
+  const manager = new ProxyManager(server, { resolveDNS: async () => [] });
+  const input = { domain: 'terminal.example.com', mode: 'existing', httpPort: 8080, httpsPort: 8443 };
+  const plan = await manager.preview(input);
+  await manager.apply({ planId: plan.id, confirmed: true, credential: 'never-save-this' });
+  // Simulate a deployment created before reusable settings were introduced.
+  await rm(join(manager.root, 'last-settings.json'));
+  await manager.disable('never-save-this');
+  assert.equal(await readFile(configPath, 'utf8'), original);
+  const reopened = new ProxyManager(server, { resolveDNS: async () => [] });
+  const status = await reopened.status();
+  assert.equal(status.configuration, null);
+  assert.deepEqual(status.lastSettings, input);
+  const next = await reopened.preview(status.lastSettings);
+  await reopened.apply({ planId: next.id, confirmed: true });
+  assert.equal((await reopened.status()).configuration.domain, input.domain);
+});

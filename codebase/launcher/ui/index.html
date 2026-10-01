@@ -14,6 +14,8 @@
 </section>
 <section id="exposure" hidden><h1>External access</h1><p class="muted">Prepare a dedicated HTTPS proxy or connect one you already manage. Your backend stays on this computer's loopback interface.</p>
 <ol class="steps"><li>Choose a domain</li><li>Review DNS and network requirements</li><li>Install, apply and verify</li></ol>
+<label class="switch-row"><span>External HTTPS<small>Turn on to review and apply your settings. Turn off to confirm a restart and restore local access.</small></span><input id="https-enabled" type="checkbox" role="switch" aria-describedby="https-help"><span class="track" aria-hidden="true"></span></label>
+<p id="https-help" class="muted">Off does not uninstall Caddy. Return to External access, turn this switch on, review your saved domain and ports, then choose Apply and restart. The switch shows applied configuration; check Connection status for reachability.</p>
 <form id="proxy-form"><label>Proxy<select name="mode"><option value="managed">Install and manage Caddy</option><option value="existing">Use an existing proxy on this computer</option></select></label><label>Public domain<input name="domain" placeholder="terminal.example.com" required></label>
 <div class="columns"><label>Local HTTP port<input name="httpPort" type="number" min="1" max="65535" value="80" required></label><label>Local HTTPS port<input name="httpsPort" type="number" min="1" max="65535" value="443" required></label></div>
 <p class="muted">Public ports 80 and 443 must reach these proxy ports. High local ports can be used behind your router's port forwarding. Router and firewall settings remain under your control.</p>

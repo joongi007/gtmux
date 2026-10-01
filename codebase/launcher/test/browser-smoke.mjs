@@ -27,7 +27,7 @@ try {
   await page.getByRole('button', { name: 'Save setup', exact: true }).click();
   await page.getByRole('button', { name: 'Start server', exact: true }).click();
   await page.locator('#state').filter({ hasText: /^running$/ }).waitFor({ timeout: 30000 });
-  assert.equal(await page.locator('[role="switch"]').count(), 1);
+  assert.equal(await page.locator('[role="switch"]').count(), 2);
   const token = new URL(supervisor.openURL()).searchParams.get('token');
   const response = await fetch(`http://127.0.0.1:${port}/api/sessions`, {
     method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
@@ -40,7 +40,24 @@ try {
   assert.notEqual(supervisor.child.pid, oldPid);
   await page.getByRole('button', { name: 'External access', exact: true }).click();
   await page.locator('[name="domain"]').fill('terminal.example.com');
-  await page.getByRole('button', { name: 'Review deployment', exact: true }).click();
+  await page.locator('#proxy-form [name=mode]').selectOption('existing');
+  await page.locator('#https-enabled').click();
+  await page.locator('#plan:not([hidden])').waitFor();
+  assert.equal(await page.locator('#https-enabled').isChecked(), false, 'preview must not claim HTTPS is enabled');
+  await page.locator('#apply').click();
+  await page.waitForFunction(() => document.querySelector('#https-enabled').checked);
+  await page.locator('#https-enabled').click();
+  await page.locator('#stop-confirm:not([hidden])').waitFor();
+  assert.equal(await page.locator('#https-enabled').isChecked(), true, 'off requires confirmation');
+  await page.locator('#cancel-stop').click();
+  assert.equal(await page.locator('#https-enabled').isChecked(), true);
+  await page.locator('#https-enabled').click();
+  await page.locator('#confirm-stop').click();
+  await page.waitForFunction(() => !document.querySelector('#https-enabled').checked);
+  await page.reload();
+  await page.getByRole('button', { name: 'External access', exact: true }).click();
+  await page.waitForFunction(() => document.querySelector('#proxy-form [name=domain]').value === 'terminal.example.com');
+  await page.locator('#https-enabled').click();
   await page.locator('#plan:not([hidden])').waitFor();
   await page.setViewportSize({ width: 700, height: 800 });
   assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'manager must not overflow narrow desktop window');

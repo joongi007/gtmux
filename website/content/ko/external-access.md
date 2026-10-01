@@ -29,3 +29,7 @@ Restore local access는 앱 소유 프록시를 종료하고 백업 TOML을 복�
 ## 참고
 
 인증서 발급·갱신은 [Caddy automatic HTTPS](https://caddyserver.com/docs/automatic-https)를 참고합니다. 기존 gateway·하위 경로 배포는 이 루트 origin 마법사와 별도 범위입니다.
+
+## HTTPS 끄기와 다시 켜기
+
+관리자의 External access에서 External HTTPS 스위치를 사용합니다. 끌 때는 확인 후 서버를 재시작하고 원래 로컬 설정을 복원합니다. Caddy 설치와 마지막 도메인·프록시 모드·포트는 유지하며 비밀번호는 저장하지 않습니다. 다시 켤 때는 스위치를 누르고 저장된 값을 검토한 뒤 Apply and restart를 선택합니다. 설정 적용 전에는 스위치가 off로 유지됩니다. on은 설정 상태이며 공개 접속 성공을 뜻하지 않습니다. Verify public HTTPS로 접근 가능 여부를 확인합니다. 기존 외부 프록시는 해당 소유자가 계속 관리합니다.

@@ -1,5 +1,5 @@
 const $ = id => document.getElementById(id);
-let status, plan, pendingAction, busy = false, populated = false;
+let status, plan, pendingAction, busy = false, populated = false, proxyPopulated = false;
 async function request(path, data) {
   const response = await fetch(`/api/${path}`, data === undefined ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
   const result = await response.json(); if (!response.ok) throw new Error(result.error || `Request failed (${response.status})`); return result;
@@ -19,11 +19,20 @@ async function refresh() {
   $('open').disabled = busy || status.state !== 'running';
   $('stop').disabled = busy || !status.pid; $('restart').disabled = busy || !status.pid;
   $('proxy-status').textContent = `${status.proxy.installed ? 'Proxy installed' : 'Proxy not installed'} · ${status.proxy.running ? 'running' : 'stopped'}${status.proxy.configuration ? ' · https://' + status.proxy.configuration.domain : ''}`;
+  $('https-enabled').checked = Boolean(status.proxy.configuration);
+  $('https-enabled').disabled = busy || !status.configured;
+  $('disable').disabled = busy || !status.proxy.configuration;
+  if (!proxyPopulated) {
+    const saved = status.proxy.configuration || status.proxy.lastSettings;
+    if (saved) for (const key of ['domain', 'mode', 'httpPort', 'httpsPort']) $('proxy-form').elements[key].value = saved[key];
+    proxyPopulated = true;
+  }
   if (status.error) $('error').textContent = status.error;
 }
 async function action(run, message) {
   if (busy) return; busy = true; $('error').textContent = ''; $('message').textContent = 'Working…';
   for (const button of document.querySelectorAll('button')) button.disabled = true;
+  $('https-enabled').disabled = true;
   try { const result = await run(); $('message').textContent = message || 'Done.'; return result; }
   catch (e) { $('error').textContent = e.message; $('message').textContent = ''; }
   finally { busy = false; for (const button of document.querySelectorAll('button')) button.disabled = false; await refresh().catch(e => $('error').textContent = e.message); }
@@ -43,6 +52,16 @@ for (const id of ['stop', 'restart', 'disable']) $(id).onclick = () => {
 };
 $('cancel-stop').onclick = () => { $('stop-confirm').hidden = true; $('credential').value = ''; };
 $('confirm-stop').onclick = () => action(async () => { const credential = $('credential').value; $('credential').value = ''; await request(pendingAction, { confirmed: true, credential }); $('stop-confirm').hidden = true; }, 'Server operation complete.');
+$('https-enabled').onchange = () => {
+  const enabled = Boolean(status.proxy.configuration);
+  $('https-enabled').checked = enabled;
+  if (enabled) $('disable').click();
+  else {
+    $('message').textContent = 'Review the domain and ports, then apply to turn HTTPS on.';
+    $('proxy-form').elements.domain.focus();
+    $('proxy-form').requestSubmit();
+  }
+};
 $('proxy-form').onsubmit = event => { event.preventDefault(); const form = $('proxy-form').elements;
   void action(async () => { plan = await request('proxy/preview', { mode: form.mode.value, domain: form.domain.value, httpPort: Number(form.httpPort.value), httpsPort: Number(form.httpsPort.value) });
     for (const id of ['changes', 'prerequisites']) { $(id).replaceChildren(...plan[id].map(text => { const li = document.createElement('li'); li.textContent = text; return li; })); }
