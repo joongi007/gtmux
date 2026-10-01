@@ -1,0 +1,26 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>gtmux · Server manager</title><link rel="stylesheet" href="/style.css"></head><body>
+<header><strong>gtmux</strong><span>Server manager</span><span id="platform"></span></header>
+<main><nav aria-label="Manager sections"><button data-section="server" aria-current="page">Server</button><button data-section="exposure">External access</button></nav>
+<div class="content"><p id="message" role="status"></p><p id="error" role="alert"></p>
+<section id="server"><h1>Your server, your workspace</h1><p class="muted">Choose how you open gtmux. This manager uses its own configuration and session storage.</p>
+<form id="setup"><label>Open with<select name="mode"><option value="both">Web + app</option><option value="web">Web browser</option><option value="app">App window</option></select></label>
+<label>Startup port<input name="port" type="number" min="1024" max="65535" value="9001" required></label>
+<label>Workspace folder<input name="workspace" placeholder="Absolute project folder path" required></label>
+<label class="switch-row"><span>Keep running when the app window closes<small>The tray menu keeps server controls available. Quitting the app stops its server.</small></span><input name="background" type="checkbox" role="switch"><span class="track" aria-hidden="true"></span></label>
+<button type="submit" class="primary">Save setup</button></form>
+<p id="config-hint" class="muted"></p><dl><dt>State</dt><dd id="state">Loading…</dd><dt>Address</dt><dd id="address">—</dd><dt>Configuration</dt><dd id="config"></dd><dt>Log</dt><dd id="log"></dd></dl>
+<div class="actions"><button id="start" class="primary">Start server</button><button id="open">Open workspace</button><button id="restart">Restart…</button><button id="stop" class="danger">Stop server…</button></div>
+<div id="stop-confirm" class="confirm" hidden><p>All running terminal programs in this managed server will end. Saved layouts remain.</p><label>Server password, if configured<input id="credential" type="password" autocomplete="current-password"></label><button id="confirm-stop" class="danger">Confirm</button><button id="cancel-stop">Cancel</button></div>
+</section>
+<section id="exposure" hidden><h1>External access</h1><p class="muted">Prepare a dedicated HTTPS proxy or connect one you already manage. Your backend stays on this computer's loopback interface.</p>
+<ol class="steps"><li>Choose a domain</li><li>Review DNS and network requirements</li><li>Install, apply and verify</li></ol>
+<form id="proxy-form"><label>Proxy<select name="mode"><option value="managed">Install and manage Caddy</option><option value="existing">Use an existing proxy on this computer</option></select></label><label>Public domain<input name="domain" placeholder="terminal.example.com" required></label>
+<div class="columns"><label>Local HTTP port<input name="httpPort" type="number" min="1" max="65535" value="80" required></label><label>Local HTTPS port<input name="httpsPort" type="number" min="1" max="65535" value="443" required></label></div>
+<p class="muted">Public ports 80 and 443 must reach these proxy ports. High local ports can be used behind your router's port forwarding. Router and firewall settings remain under your control.</p>
+<button type="submit">Review deployment</button></form>
+<div id="plan" hidden><h2>Review changes</h2><ul id="changes"></ul><h2>Network prerequisites</h2><ul id="prerequisites"></ul><p id="dns"></p>
+<p class="muted">Applying restarts this managed server and ends its terminal programs. The original TOML is backed up before replacement; generated configuration replaces formatting and comments.</p><label>Server password, if configured<input id="proxy-credential" type="password" autocomplete="current-password"></label>
+<div class="actions"><button id="install">Install verified proxy</button><button id="apply" class="primary">Apply and restart</button></div></div>
+<h2>Connection status</h2><p id="proxy-status">Not configured</p><div class="actions"><button id="verify">Verify public HTTPS</button><button id="disable" class="danger">Restore local access…</button></div>
+<p class="muted">The proxy renews certificates while it is running. A running process alone does not mean your public address is reachable. Verification checks the public HTTPS endpoint.</p></section>
+</div></main><script type="module" src="/app.js"></script></body></html>

@@ -1189,3 +1189,31 @@ Automatic restart, Electron window/tray/background permissions and web/app
 launch modes are future work. Restart the standalone server using the same
 `gtmux start --name <instance> --config <path>` command. A newly saved port
 applies on that start; update any reverse proxy and CLI overrides accordingly.
+
+
+## Packaged server and desktop manager
+
+Build the backend with `cargo build --locked --bin gtmux` in `codebase/backend`.
+Build the frontend into an isolated directory:
+`npm run build -- --outDir ../../.artifacts/frontend` in `codebase/frontend`.
+From the repository root, stage resources with
+`node scripts/prepare-launcher.mjs codebase/backend/target/debug/gtmux .artifacts/frontend`
+(use `gtmux.exe` on Windows). Then run `npm ci` and `npm start` in
+`codebase/launcher`; `npm run web` provides the local browser manager instead.
+Use `--data-dir` with the web manager to select an isolated test profile.
+
+Choose an unused port and project folder on first run. Saved server settings are
+in the manager's own `server.toml`. Change port/workspace through workspace
+Settings → Server, then restart from the manager. Stop/restart ends live terminal
+programs but preserves saved session layouts. The manager controls only processes
+it started. Background mode keeps a tray control; quitting stops its server.
+
+External access: enter a public domain, review DNS/port prerequisites, install
+the checksum-verified proxy, apply the plan, then verify public HTTPS. DNS,
+router forwarding and firewall permissions are prerequisites, not automatically
+changed. Backup/rollback protects the original TOML and detects external edits.
+The application does not obtain a certificate during build or tests.
+
+Configuration sample reference pages are regenerated on every website build.
+CI requires English documentation changes and corresponding Korean updates for
+code changes; reviewers still verify accuracy and translation meaning.

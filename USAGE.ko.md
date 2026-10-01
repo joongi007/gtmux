@@ -1124,3 +1124,29 @@ backend 참조를 보유한 경우 blocking thread에서 `PtyBackend::shutdown`�
 자동 재시작, Electron 창·트레이·백그라운드 권한과 웹/앱 실행 모드는 후속 범위다.
 독립 실행 서버는 기존 `gtmux start --name <instance> --config <path>` 명령으로
 다시 시작한다. 저장한 포트는 이때 적용되므로 프록시와 CLI 우선 적용값도 확인한다.
+
+
+## 패키지 서버와 데스크톱 관리자
+
+`codebase/backend`에서 `cargo build --locked --bin gtmux`로 서버를 빌드합니다.
+`codebase/frontend`에서 `npm run build -- --outDir ../../.artifacts/frontend`로
+별도 프런트엔드를 만듭니다. 저장소 루트에서
+`node scripts/prepare-launcher.mjs codebase/backend/target/debug/gtmux .artifacts/frontend`
+(Windows는 `gtmux.exe`)를 실행한 뒤 `codebase/launcher`에서 `npm ci`, `npm start`를
+실행합니다. `npm run web`은 로컬 브라우저 관리자를 제공하며 `--data-dir`로
+별도의 테스트 프로필을 선택할 수 있습니다.
+
+첫 실행에서 사용하지 않는 포트와 프로젝트 폴더를 선택합니다. 설정은 관리자의
+독립된 `server.toml`에 저장됩니다. 이후 포트·작업 폴더는 워크스페이스 설정 → 서버에서
+수정하고 관리자에서 재시작합니다. 중지·재시작은 실행 중 터미널 프로그램을 종료하지만
+저장된 세션 레이아웃은 유지합니다. 직접 실행한 프로세스만 관리하며 백그라운드 모드는
+트레이로 제어합니다. 앱 종료 시 서버도 종료합니다.
+
+외부 공개: 공개 도메인을 입력하고 DNS·포트 조건을 검토한 뒤 체크섬 검증된 프록시를
+설치하고 계획을 적용합니다. 마지막으로 공개 HTTPS를 확인합니다. DNS·공유기 포트
+전달·방화벽 권한은 사전 조건이며 자동 변경하지 않습니다. 원본 TOML을 백업하고
+외부 변경을 감지하여 복구 시 덮어쓰기를 방지합니다. 빌드·테스트에서는 인증서를
+발급하지 않습니다.
+
+설정 샘플 참조 페이지는 문서 빌드 때 자동 생성합니다. 코드 변경 시 영문 문서와
+대응하는 한글 변경을 CI에서 요구합니다. 내용 정확성과 번역 의미는 리뷰로 확인합니다.
