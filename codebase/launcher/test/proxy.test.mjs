@@ -77,7 +77,7 @@ test('disabling HTTPS preserves reusable settings across manager launches withou
   const reopened = new ProxyManager(server, { resolveDNS: async () => [] });
   const status = await reopened.status();
   assert.equal(status.configuration, null);
-  assert.deepEqual(status.lastSettings, input);
+  assert.deepEqual(status.lastSettings, { ...input, certificate: 'public', externalPort: 443 });
   const next = await reopened.preview(status.lastSettings);
   await reopened.apply({ planId: next.id, confirmed: true });
   assert.equal((await reopened.status()).configuration.domain, input.domain);

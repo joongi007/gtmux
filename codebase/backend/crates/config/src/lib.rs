@@ -640,10 +640,8 @@ fn validate(cfg: &Config) -> Result<(), ConfigError> {
 
     if let Some(origin) = &cfg.public_origin {
         let host = origin.strip_prefix("https://").ok_or_else(|| ConfigError::Validation("public_origin must be an HTTPS origin".into()))?;
-        if host.is_empty() || host.len() > 253 || host.contains(['/', '@', '?', '#', ':'])
-            || !host.split('.').all(|label| !label.is_empty() && label.len() <= 63 && !label.starts_with('-') && !label.ends_with('-')
-                && label.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')) {
-            return Err(ConfigError::Validation("public_origin must contain a DNS hostname with no path, credentials or port".into()));
+        if !valid_https_authority(host) {
+            return Err(ConfigError::Validation("public_origin must contain a DNS hostname or IP address with an optional valid port, without credentials or a path".into()));
         }
         if !matches!(derive_mode(&cfg.server.bind), Mode::Local) || cfg.server.bind != "127.0.0.1" {
             return Err(ConfigError::Validation("public_origin requires the managed IPv4 loopback backend".into()));
@@ -1296,6 +1294,20 @@ cors_origins = ["http://example.test:8443", "http://127.0.0.1:9001"]
     }
 }
 
+fn valid_https_authority(authority: &str) -> bool {
+    if authority.is_empty() || authority.contains(['/', '@', '?', '#', '%']) { return false; }
+    let (host, port) = if authority.starts_with('[') {
+        let Some((ip, suffix)) = authority[1..].split_once(']') else { return false; };
+        if ip.parse::<std::net::Ipv6Addr>().is_err() { return false; }
+        (ip, if suffix.is_empty() { None } else if let Some(p) = suffix.strip_prefix(':') { Some(p) } else { return false; })
+    } else {
+        let (name, port) = authority.split_once(':').map_or((authority, None), |(h,p)| (h,Some(p)));
+        if name.len() > 253 || !name.split('.').all(|label| !label.is_empty() && label.len() <= 63 && !label.starts_with('-') && !label.ends_with('-') && label.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')) { return false; }
+        (name, port)
+    };
+    !host.is_empty() && port.map_or(true, |p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()) && p.parse::<u16>().is_ok_and(|p| p > 0))
+}
+
 #[cfg(test)]
 mod proxy_tests {
     use super::*;
@@ -1313,6 +1325,16 @@ tls_required=false
 trusted_proxy_ips=["127.0.0.1/32"]
 rate_limit_auth_failures_per_minute=10
 "#;
+    #[test]
+    fn ip_origins_and_ports_keep_exact_host_and_cors_policy() {
+        for host in ["192.168.1.4", "192.168.1.4:8443", "[2001:db8::1]", "[::1]:8443", "terminal.example.com:8443"] {
+            let cfg = parse_document(&PROXY.replace("terminal.example.com", host)).unwrap();
+            assert!(cfg.tls_required());
+        }
+        for host in ["[broken]", "::1", "[::1]evil", "host:0", "host:65536", "host:", "host:443/path", "user@host", "host?x", "[fe80::1%eth0]"] {
+            assert!(parse_document(&PROXY.replace("terminal.example.com", host)).is_err(), "{host}");
+        }
+    }
     #[test]
     fn loopback_public_origin_enables_cloud_and_secure_cookies() {
         let cfg = parse_document(PROXY).unwrap();

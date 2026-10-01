@@ -33,3 +33,15 @@ A failed deployment attempts to restore the prior configuration. Read the report
 ## Turn HTTPS off and on again
 
 Use the External HTTPS switch in the manager’s External access section. Turning it off asks for confirmation before restarting the server and restoring the original local configuration. Caddy stays installed and the last domain, proxy mode and ports are remembered, without storing your password. To enable it again, turn the switch on, review the saved fields, and choose Apply and restart. The switch stays off until the configuration is applied. An enabled switch means configured, not verified public connectivity; use Verify public HTTPS to check reachability. An existing external proxy remains under its owner’s control.
+
+## IP addresses and certificate status
+
+The same wizard accepts a public IPv4/IPv6 address as well as a domain. Choose **Public CA (Let's Encrypt)** for a publicly reachable address you control. Caddy uses the short-lived ACME profile for IP certificates; keep Caddy running for renewal. A public IP still needs incoming validation traffic on public ports 80/443. Enter the externally visible HTTPS port separately from the local listener when gateway forwarding differs. The manager cannot provision a public IP, change your router, or bypass carrier-grade NAT.
+
+For a private LAN IP or loopback address, choose **Local CA**. Caddy issues a private certificate and never automatically modifies the operating system trust store. After applying, **Download local CA certificate** exports only the public root certificate. Trust it on each intended client through that client's certificate manager; the private CA key remains in the manager data directory. Verification pins that CA only for this manager's own probe. Other clients remain untrusted until configured.
+
+**Verify public HTTPS** shows issuer, expiration, remaining days and verification time, and confirms the endpoint belongs to the current server. It rejects untrusted certificates and a proxy pointing at another server. This is an on-demand snapshot, not continuous remote monitoring. A successful local probe does not prove that an external network can reach your router; also test from another network before relying on public access.
+
+The pinned Caddy binary has been tested with actual local CA issuance and its public-IP configuration schema. Actual public-domain/IP ACME issuance requires a reachable address controlled by the operator and is not part of isolated tests. See [Let's Encrypt IP certificates](https://letsencrypt.org/2026/01/15/6day-and-ip-general-availability/).
+
+IP listeners set Caddy’s [default SNI](https://caddyserver.com/docs/caddyfile/options#default-sni) to the configured address so clients without SNI receive the right certificate behind NAT. The regression test connects to loopback with a different certificate IP and validates its identity without disabling certificate checks.

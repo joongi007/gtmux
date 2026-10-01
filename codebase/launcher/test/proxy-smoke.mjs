@@ -13,6 +13,7 @@ const proxy = new ProxyManager({ root, serverPath: async p => p, config: async (
 try {
   await proxy.install();
   const config = proxyConfiguration('terminal.example.com', port, 80, proxyPort);
+  delete config.apps.tls; // This forwarding check must never contact an ACME CA.
   config.admin = { listen: 'unix/' + join(proxy.root, 'admin.sock') };
   config.apps.http.servers.gtmux.listen = [`127.0.0.1:${proxyPort}`];
   config.apps.http.servers.gtmux.automatic_https = { disable: true };
