@@ -1152,3 +1152,9 @@ backend 참조를 보유한 경우 blocking thread에서 `PtyBackend::shutdown`�
 대응하는 한글 변경을 CI에서 요구합니다. 내용 정확성과 번역 의미는 리뷰로 확인합니다.
 
 브라우저 탭 제목의 unread 개수는 기본적으로 숨깁니다. **Settings → Appearance → Terminal activity → Unread in browser tab**을 켜면 다시 표시됩니다. Terminal activity, Unread output, Browser tab indicators도 켜져 있어야 합니다. Activity 목록의 unread 표시는 별도로 유지됩니다. 숨긴 사이드바 목록은 같은 위치의 Activity list를 켜서 복원합니다.
+
+### 에이전트 hook·IP HTTPS·앱 업데이트
+
+데스크톱 관리자의 **Agent activity**에서 Claude Code·Codex·Gemini CLI·Copilot·Cursor·Aider·OpenCode 연동 설정을 생성하거나 설치 내용을 검토합니다. 기존 설정을 백업하고 충돌을 표시하며 에이전트 재시작과 자체 hook 신뢰 확인이 필요합니다. [에이전트 설정](website/content/ko/agents.md)을 참고하세요.
+
+**External access**에서 Caddy를 통한 도메인·공인 IP 인증서와 사설 IP용 Local CA를 선택하고 on/off·설정 복원·루트 인증서 내보내기·인증서 검증을 수행합니다. 네트워크 조건은 [HTTPS 설정](website/content/ko/external-access.md)에 있습니다. **Updates**는 릴리스 피드가 설정된 앱에서 선택적인 자동 확인·다운로드와 명시적 확인 후 설치를 지원합니다. [업데이트 준비와 한계](website/content/ko/updates.md)를 참고하세요. 서버가 꺼진 상태의 포트 복구 기능은 외부 TOML 변경을 다시 읽은 뒤 저장합니다.

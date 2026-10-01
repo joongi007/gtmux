@@ -26,3 +26,5 @@ execution is opt-in and must leave an accessible tray control.
 Check light and dark appearance, keyboard navigation, narrow windows, long paths,
 errors and empty states. Windows filesystem paths must remain valid when selected,
 joined, copied or converted into workspace-relative references.
+
+The manager imports the canonical workspace tokens; packaged resources include the same CSS. Runtime interface text is English. Only documentation is translated at this stage. Browser regression checks exercise slide switches, a 700px manager window, both themes, keyboard resizing and Activity width restoration.

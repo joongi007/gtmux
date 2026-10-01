@@ -1,3 +1,5 @@
+import { AgentInstall } from './agent-install.mjs';
+import { agentConfiguration } from './agents.mjs';
 import { createServer } from 'node:http';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
@@ -5,7 +7,8 @@ import { fileURLToPath } from 'node:url';
 const ui = new URL('../ui/', import.meta.url);
 const assets = { '/': ['index.html', 'text/html'], '/app.js': ['app.js', 'text/javascript'], '/style.css': ['style.css', 'text/css'] };
 const equal = (a, b) => typeof a === 'string' && a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
-export async function controlServer({ supervisor, proxy, platform = process.platform, onOpen, onPreferences }) {
+export async function controlServer({ supervisor, proxy, platform = process.platform, onOpen, onPreferences, updates, designTokens = new URL('../../frontend/src/styles/tokens.css', import.meta.url) }) {
+  const integrations = new AgentInstall(supervisor);
   let operation = Promise.resolve();
   const secret = randomBytes(32).toString('hex'); let origin, cookieName;
   const server = createServer(async (req, res) => {
@@ -22,10 +25,11 @@ export async function controlServer({ supervisor, proxy, platform = process.plat
       }
       const cookie = req.headers.cookie?.split(';').map(s => s.trim()).find(s => s.startsWith(`${cookieName}=`))?.slice(cookieName.length + 1);
       if (!equal(cookie, secret)) return reply(401, { error: 'Open the management URL printed when the launcher starts.' });
+      if (req.method === 'GET' && url.pathname === '/tokens.css') { res.writeHead(200, { 'Content-Type': 'text/css' }); return res.end(await readFile(designTokens)); }
       if (req.method === 'GET' && assets[url.pathname]) {
         const [path, type] = assets[url.pathname]; res.writeHead(200, { 'Content-Type': type }); return res.end(await readFile(new URL(path, ui)));
       }
-      if (req.method === 'GET' && url.pathname === '/api/status') return reply(200, { ...supervisor.status(), platform, proxy: await proxy.status() });
+      if (req.method === 'GET' && url.pathname === '/api/status') return reply(200, { ...supervisor.status(), platform, proxy: await proxy.status(), updates: updates?.status() ?? { supported: false, automatic: false, phase: 'unavailable', error: 'App updates require an installed desktop package. Server archives can be replaced after stopping their server.' } });
       if (req.method !== 'POST' || req.headers.origin !== origin || !req.headers['content-type']?.startsWith('application/json'))
         return reply(403, { error: 'Management requests must originate from this local control page.' });
       let body = ''; for await (const chunk of req) { body += chunk; if (Buffer.byteLength(body) > 16384) throw new Error('Request too large.'); }
@@ -34,6 +38,15 @@ export async function controlServer({ supervisor, proxy, platform = process.plat
       await previous;
       try {
       switch (url.pathname) {
+        case '/api/config/port': result = data.port === undefined ? await supervisor.savedPort() : await supervisor.changePort(data); break;
+        case '/api/agent/preview': result = await integrations.preview(data.agent, data.remove === true); break;
+        case '/api/agent/apply': result = await integrations.apply(data); break;
+        case '/api/agent/hooks': {
+          result = await agentConfiguration(supervisor, data.agent); break;
+        }
+        case '/api/updates/preferences': if (!updates) throw new Error('Desktop updates unavailable.'); result = await updates.preferences(data); break;
+        case '/api/updates/check': if (!updates) throw new Error('Desktop updates unavailable.'); void updates.check(data.download === true).catch(() => {}); result = updates.status(); break;
+        case '/api/updates/install': if (!updates) throw new Error('Desktop updates unavailable.'); result = await updates.install(data); break;
         case '/api/configure': result = await supervisor.configure(data); await onPreferences?.(supervisor.preferences); break;
         case '/api/start': result = await supervisor.start();
           if ((await proxy.status()).configuration?.mode === 'managed') await proxy.start(); break;
@@ -51,6 +64,7 @@ export async function controlServer({ supervisor, proxy, platform = process.plat
         case '/api/proxy/install': result = await proxy.install(); break;
         case '/api/proxy/preview': result = await proxy.preview(data); break;
         case '/api/proxy/apply': result = await proxy.apply(data); break;
+        case '/api/proxy/root-certificate': result = await proxy.rootCertificate(); break;
         case '/api/proxy/verify': result = await proxy.verify(); break;
         case '/api/proxy/disable':
           if (!data.confirmed) throw new Error('Confirm server restart before restoring local access.');

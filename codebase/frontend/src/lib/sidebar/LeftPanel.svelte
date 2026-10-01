@@ -119,6 +119,14 @@
     chromeStore.toggleLeftPanelWidthMinimize(contentFit);
   }
 
+  function onResizeKeyDown(event: KeyboardEvent): void {
+    const step = event.shiftKey ? 50 : 10;
+    const width = event.key === 'ArrowRight' ? panelWidth + step : event.key === 'ArrowLeft' ? panelWidth - step
+      : event.key === 'Home' ? 230 : event.key === 'End' ? 520 : null;
+    if (width === null) return;
+    event.preventDefault(); chromeStore.setLeftPanelWidth(width);
+  }
+
   function onResizePointerDown(e: PointerEvent): void {
     if (e.button !== 0) return;
     e.preventDefault();
@@ -331,7 +339,8 @@
       type="button"
       class="resize-handle"
       aria-label="Resize left panel"
-      title="Resize left panel (double-click to minimize width)"
+      title="Resize left panel (arrow keys adjust width; double-click minimizes)"
+      onkeydown={onResizeKeyDown}
       onpointerdown={onResizePointerDown}
       ondblclick={onResizeDblClick}
     ></button>
@@ -339,6 +348,7 @@
 {/if}
 
 <style>
+  .resize-handle:focus-visible { outline: 2px solid var(--color-info); outline-offset: 2px; }
   /* Expanded panel — floating on the left edge, full workspace height. */
   .left-panel {
     position: absolute;

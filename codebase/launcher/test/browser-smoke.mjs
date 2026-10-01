@@ -1,7 +1,7 @@
 // GTMUX_TEST_BINARY must point to a freshly built server. Own temporary data only.
 import { chromium } from 'playwright';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { resolve, join } from 'node:path';
 import { createServer } from 'node:net';
@@ -27,7 +27,7 @@ try {
   await page.getByRole('button', { name: 'Save setup', exact: true }).click();
   await page.getByRole('button', { name: 'Start server', exact: true }).click();
   await page.locator('#state').filter({ hasText: /^running$/ }).waitFor({ timeout: 30000 });
-  assert.equal(await page.locator('[role="switch"]').count(), 2);
+  assert.equal(await page.locator('[role="switch"]').count(), 3);
   const token = new URL(supervisor.openURL()).searchParams.get('token');
   const response = await fetch(`http://127.0.0.1:${port}/api/sessions`, {
     method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
@@ -61,6 +61,26 @@ try {
   await page.locator('#plan:not([hidden])').waitFor();
   await page.setViewportSize({ width: 700, height: 800 });
   assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'manager must not overflow narrow desktop window');
+  await page.getByRole('button', { name: 'Agent activity', exact: true }).click();
+  await page.locator('#agent').selectOption('claude');
+  await page.locator('#agent-generate').click();
+  await page.waitForFunction(() => document.querySelector('#agent-configuration').textContent.includes('PermissionRequest'));
+  await page.locator('#agent').selectOption('codex');
+  assert.equal(await page.locator('#agent-configuration').textContent(), '');
+  assert.equal(await page.locator('#agent-copy').isDisabled(), true);
+  await page.getByRole('button', { name: 'Server', exact: true }).click();
+  if (process.env.GTMUX_SCREENSHOTS) {
+    await mkdir(process.env.GTMUX_SCREENSHOTS, {recursive:true});
+    for (const theme of ['light','dark']) {
+      await page.locator('[name="theme"]').selectOption(theme);
+      for (const section of ['Server','External access','Agent activity','Updates']) {
+        await page.getByRole('button', {name:section,exact:true}).click();
+        await page.screenshot({path:join(process.env.GTMUX_SCREENSHOTS,`manager-${section.replaceAll(' ','-')}-${theme}.png`),fullPage:true});
+        assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+      }
+      await page.getByRole('button', { name: 'Server', exact: true }).click();
+    }
+  }
   assert.deepEqual(errors, []);
   await page.getByRole('button', { name: 'Server', exact: true }).click();
   await page.getByRole('button', { name: 'Stop server…', exact: true }).click();

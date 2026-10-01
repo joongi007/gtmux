@@ -1219,3 +1219,9 @@ CI requires English documentation changes and corresponding Korean updates for
 code changes; reviewers still verify accuracy and translation meaning.
 
 Unread counts in browser tab titles are off by default. Enable **Settings → Appearance → Terminal activity → Unread in browser tab** to restore them; also enable Terminal activity, Unread output and Browser tab indicators. The Activity list still shows unread output independently. To restore a hidden sidebar list, enable Activity list in the same section.
+
+### Agent hooks, IP HTTPS and app updates
+
+In the desktop manager, use **Agent activity** to generate or review additive Claude Code, Codex, Gemini CLI, Copilot, Cursor, Aider and OpenCode integrations. Existing settings are backed up and conflicts are reported; restart the agent and review its hook trust prompt. See [agent setup](website/content/en/agents.md).
+
+**External access** supports domain/public-IP certificates through Caddy and local-CA certificates for private IPs, with on/off, saved settings, root certificate export and certificate verification. [HTTPS setup](website/content/en/external-access.md) explains network prerequisites. **Updates** provides optional automatic checks/downloads and explicit confirmed installation for release-configured desktop packages; [update preparation and limitations](website/content/en/updates.md). The stopped-server port recovery control reloads external TOML changes before saving.

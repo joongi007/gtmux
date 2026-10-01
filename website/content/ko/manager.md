@@ -25,3 +25,9 @@
 ## 숨긴 Activity 표시 복원
 
 워크스페이스의 Settings → Appearance → Terminal activity에서 Activity list를 켜면 사이드바 탭이 복원됩니다. Unread in browser tab은 기본 off이며, Unread output 및 Browser tab indicators와 함께 켜면 제목에 unread 개수가 나타납니다. 표시를 꺼도 포맷과 저장된 사이드바 폭은 유지됩니다.
+
+## 포트 복구와 화면 설정
+
+서버가 중지되었을 때 **Change startup port or recover from a conflict**를 펼치고 저장된 포트를 다시 읽은 뒤 빈 포트로 저장할 수 있습니다. 파일 변경 충돌을 검사하고 나머지 TOML을 보존하며 지원하지 않는 표현식은 덮어쓰지 않습니다. 외부 편집 후에는 파일을 명시적으로 다시 읽고 시작 설정 적용을 위해 재시작하세요. 여러 줄의 loopback 허용 목록은 TOML에서 포트와 함께 수정해야 합니다.
+
+관리 화면도 워크스페이스 디자인 토큰을 공유하며 System·Light·Dark 테마를 제공합니다. Save setup으로 테마를 저장합니다. 워크스페이스의 사이드바 크기 조절 핸들은 방향키(10px), Shift+방향키(50px), Home·End를 지원합니다. Activity 표시 여부별 폭은 별도로 저장되어 새로고침과 on/off 이후에도 유지됩니다.

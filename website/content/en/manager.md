@@ -25,3 +25,9 @@ The manager shows the configuration and log paths. Tokens are redacted from mana
 ## Restore hidden activity indicators
 
 In the workspace, open Settings → Appearance → Terminal activity. Enable Activity list to restore the sidebar tab. Unread in browser tab is off by default; turn it on together with Unread output and Browser tab indicators to include unread counts in the title. Hiding indicators retains formats and saved sidebar widths.
+
+## Port recovery and appearance
+
+When the server is stopped, expand **Change startup port or recover from a conflict**, reload the saved port and save a free port. The manager checks the file revision, preserves unrelated TOML and refuses unsupported expressions instead of overwriting them. For external edits, reload the saved file explicitly; restart to apply startup changes. Multiline loopback allowlists must be updated together with the port in TOML.
+
+The manager uses the workspace design tokens and offers System, Light and Dark themes. Save setup to persist the theme. In the workspace, the resize handle also accepts arrow keys (10 px), Shift+arrow (50 px), Home and End. Activity-visible and hidden panel widths are stored separately and survive reload and toggles.

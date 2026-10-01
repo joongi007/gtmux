@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createServer } from 'node:net';
@@ -41,4 +41,16 @@ test('existing configuration cannot be overwritten through startup form', async 
 });
 test('invalid port fails before opening a socket', async () => {
   for (const value of [0, 443, 65536, 9001.5, '9001']) await assert.rejects(checkPort(value));
+});
+
+test('startup port recovery rejects running servers and external edits', async t => {
+  const manager = await fixture(t); const initial = await manager.savedPort();
+  await manager.start(); await assert.rejects(manager.changePort({port:await port(),revision:initial.revision}), /Stop/); await manager.stop();
+  const text = await readFile(manager.configPath,'utf8'); await writeFile(manager.configPath,text+'\n# external edit\n');
+  await assert.rejects(manager.changePort({port:await port(),revision:initial.revision}),/changed/i);
+  const reloaded = await manager.savedPort(), next = await port();
+  await manager.changePort({port:next,revision:reloaded.revision});
+  assert.equal((await manager.savedPort()).port,next);
+  assert((await readFile(manager.configPath,'utf8')).includes('# external edit'));
+  await manager.start(); assert.equal(manager.phase,'running');
 });

@@ -4,7 +4,8 @@ import { mkdir, stat, appendFile } from 'node:fs/promises';
 import { resolve, join, isAbsolute } from 'node:path';
 import { createServer } from 'node:net';
 import { parse, stringify } from 'smol-toml';
-import { atomicWrite, readOptional } from './files.mjs';
+import { replaceStartupPort } from './startup-config.mjs';
+import { atomicWrite, readOptional, revision } from './files.mjs';
 
 export async function checkPort(port, host = '127.0.0.1') {
   if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error('Port must be an integer from 1024 to 65535.');
@@ -18,7 +19,8 @@ export function validatePreferences(value) {
   if (typeof value.background !== 'boolean') throw new Error('Background preference must be a boolean.');
   if (!Number.isInteger(value.port) || value.port < 1024 || value.port > 65535) throw new Error('Port must be from 1024 to 65535.');
   if (typeof value.workspace !== 'string' || !isAbsolute(value.workspace)) throw new Error('Choose an absolute workspace path.');
-  return { mode: value.mode, background: value.background, port: value.port, workspace: value.workspace };
+  if (value.theme !== undefined && !['system','light','dark'].includes(value.theme)) throw new Error('Choose system, light or dark theme.');
+  return { theme: value.theme ?? 'system', mode: value.mode, background: value.background, port: value.port, workspace: value.workspace };
 }
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 export class Supervisor extends EventEmitter {
@@ -62,6 +64,23 @@ export class Supervisor extends EventEmitter {
       workspace_path: await this.serverPath(join(this.root, 'store')), server: { session: 'desktop', port: next.port, bind: '127.0.0.1' } }));
     await atomicWrite(join(this.root, 'preferences.json'), JSON.stringify(next, null, 2));
     this.preferences = next; this.changed(); return this.status();
+  }); }
+  async savedPort() {
+    const text = await readOptional(this.configPath);
+    if (!text) throw new Error('Complete setup first.');
+    return { port: parse(text).server.port, revision: revision(text) };
+  }
+  changePort({ port, revision: expected }) { return this.serial(async () => {
+    if (this.child) throw new Error('Stop this server before changing its startup port.');
+    await checkPort(port);
+    const text = await readOptional(this.configPath);
+    if (!text || revision(text) !== expected) throw new Error('Configuration changed on disk. Reload the saved port and try again.');
+    const next = replaceStartupPort(text, port);
+    if (revision(await readOptional(this.configPath)) !== expected) throw new Error('Configuration changed while saving. Reload and retry.');
+    await atomicWrite(this.configPath, next);
+    this.preferences.port = port;
+    await atomicWrite(join(this.root, 'preferences.json'), JSON.stringify(this.preferences, null, 2));
+    return this.savedPort();
   }); }
   async config() {
     const config = parse(await readOptional(this.configPath) ?? '');
