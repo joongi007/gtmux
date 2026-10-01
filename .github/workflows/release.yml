@@ -1,0 +1,78 @@
+name: Build installable artifacts
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+permissions:
+  contents: read
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            label: linux-x64
+            binary: gtmux
+          - os: ubuntu-24.04-arm
+            label: linux-arm64
+            binary: gtmux
+          - os: macos-15-intel
+            label: macos-x64
+            binary: gtmux
+          - os: macos-latest
+            label: macos-arm64
+            binary: gtmux
+          - os: windows-latest
+            label: windows-x64
+            binary: gtmux.exe
+    runs-on: ${{ matrix.os }}
+    env:
+      CARGO_BUILD_JOBS: 2
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.85.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: codebase/backend
+      - run: cargo test --workspace --locked
+        working-directory: codebase/backend
+      - run: cargo build --release --locked --bin gtmux
+        working-directory: codebase/backend
+      - run: npm ci
+        working-directory: codebase/frontend
+      - run: npm run build -- --outDir ../../.artifacts/frontend
+        working-directory: codebase/frontend
+      - run: node scripts/prepare-launcher.mjs codebase/backend/target/release/${{ matrix.binary }} .artifacts/frontend
+      - run: npm ci
+        working-directory: codebase/launcher
+      - run: npm test
+        working-directory: codebase/launcher
+      - run: node scripts/package-server.mjs ${{ matrix.label }}
+      - run: npm run dist
+        working-directory: codebase/launcher
+      - name: Check packaged Windows application lifecycle
+        if: runner.os == 'Windows'
+        run: npm run test:electron
+        working-directory: codebase/launcher
+        env:
+          GTMUX_TEST_APP: ${{ github.workspace }}/codebase/launcher/dist/win-unpacked/gtmux.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gtmux-server-${{ matrix.label }}
+          path: .artifacts/packages/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gtmux-desktop-${{ matrix.label }}
+          path: |
+            codebase/launcher/dist/*.exe
+            codebase/launcher/dist/*.zip
+            codebase/launcher/dist/*.dmg
+            codebase/launcher/dist/*.AppImage
+            codebase/launcher/dist/*.tar.gz
+# Publishing and signing require a maintainer decision. This workflow only
+# produces downloadable artifacts; it never creates a release or pushes a tag.
