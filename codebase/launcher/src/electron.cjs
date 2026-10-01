@@ -5,7 +5,7 @@ if (process.env.GTMUX_DESKTOP_DATA_DIR) {
   if (!path.isAbsolute(process.env.GTMUX_DESKTOP_DATA_DIR)) throw new Error('GTMUX_DESKTOP_DATA_DIR must be absolute.');
   app.setPath('userData', process.env.GTMUX_DESKTOP_DATA_DIR);
 }
-let managerWindow, workspaceWindow, tray, control, supervisor, proxy, quitting = false, quitPending = false;
+let managerWindow, workspaceWindow, tray, control, supervisor, proxy, updates, quitting = false, quitPending = false;
 if (!app.requestSingleInstanceLock()) app.quit();
 else {
   app.on('second-instance', showManager);
@@ -18,12 +18,20 @@ function showManager() {
 async function boot() {
   const { Supervisor } = await import('./supervisor.mjs');
   const { ProxyManager } = await import('./proxy.mjs');
+  const { Updates } = await import('./updates.mjs');
+  const { autoUpdater } = require('electron-updater');
   const { controlServer } = await import('./control.mjs');
   const resources = app.isPackaged ? path.join(process.resourcesPath, 'server') : path.join(__dirname, '../resources');
   let adapter = null; let root = path.join(app.getPath('userData'), 'managed-server');
   supervisor = new Supervisor({ root, binary: path.join(resources, process.platform === 'win32' ? 'gtmux.exe' : 'gtmux'), frontend: path.join(resources, 'frontend'), adapter });
   await supervisor.load(); proxy = new ProxyManager(supervisor, adapter ? { platform: adapter.platform, arch: adapter.arch } : {});
-  control = await controlServer({ supervisor, proxy, platform: adapter?.label ?? process.platform,
+  const updateFeed = app.isPackaged && await fs.access(path.join(process.resourcesPath, 'app-update.yml')).then(() => true, () => false);
+  const supported = updateFeed && (process.platform !== 'linux' || Boolean(process.env.APPIMAGE));
+  updates = new Updates({ root, updater: autoUpdater, supported, reason: supported ? '' : 'Install a published Windows/macOS package or Linux AppImage to enable updates. This unpacked build has no supported update feed.',
+    installFailed: () => { quitting = false; quitPending = false; if (supervisor.preferences?.background) createTray(); showManager(); },
+    stopForInstall: async credential => { if (quitPending || quitting) throw new Error('Application is already shutting down.'); quitPending = true; try { await supervisor.stop(credential); await proxy.stop(); quitting = true; updates.close(); tray?.destroy(); tray = null; } catch (e) { quitPending = false; throw e; } } });
+  await updates.load(); updates.startSchedule();
+  control = await controlServer({ supervisor, proxy, updates, designTokens: app.isPackaged ? path.join(process.resourcesPath, 'design-tokens.css') : undefined, platform: adapter?.label ?? process.platform,
     onOpen: openWorkspace, onPreferences: async preferences => {
       if (preferences.background && !tray) createTray();
       if (!preferences.background && tray) { tray.destroy(); tray = null; }
@@ -86,7 +94,7 @@ app.on('before-quit', event => {
   if (quitPending) return;
   quitPending = true;
   (async () => {
-    try { await supervisor.stop(); await proxy.stop(); await control.close(); quitting = true; tray?.destroy(); app.quit(); }
+    try { await supervisor.stop(); await proxy.stop(); await control.close(); quitting = true; updates?.close(); tray?.destroy(); app.quit(); }
     catch (error) { quitPending = false; showManager(); await dialog.showMessageBox({ type: 'warning', message: 'Server is still running',
       detail: error.message + '\nStop it from Server controls before quitting.', buttons: ['Return to server controls'] }); }
     finally { quitPending = false; }

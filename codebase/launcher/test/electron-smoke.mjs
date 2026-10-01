@@ -24,7 +24,9 @@ try {
   await page.locator('#state').filter({ hasText: /^running$/ }).waitFor({ timeout: 30000 });
   const next = app.waitForEvent('window');
   await page.getByRole('button', { name: 'Open workspace', exact: true }).click();
-  const workspace = await next; await workspace.waitForLoadState('domcontentloaded');
+  const workspace = await next;
+  // Bootstrap redirects once; the initial document can disappear after load.
+  await workspace.getByRole('button', {name:'Open existing',exact:false}).waitFor();
   assert.equal(new URL(workspace.url()).hostname, '127.0.0.1');
   assert.equal(await workspace.evaluate(() => typeof window.require), 'undefined');
   await page.getByRole('button', { name: 'Stop server…', exact: true }).click();

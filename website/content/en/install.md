@@ -36,3 +36,5 @@ macOS runtime results must pass the platform CI before a release is declared
 supported. Unsigned installers may require OS confirmation.
 
 On Windows, start the extracted server from PowerShell with `./gtmux.exe start --name local --port 9001 --workspace C:/Projects`. Native Windows backend tests and the packaged application startup/stop/exit check have passed locally. macOS runtime checks, signed distribution and public DNS/ACME validation remain release validation steps.
+
+Release-configured desktop packages also provide [automatic checks and downloads](updates.html), with explicit confirmation before installation. Local packages without a published feed remain manually replaceable.

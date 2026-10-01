@@ -35,3 +35,5 @@ Windows 이벤트로 종료합니다. 지원 릴리스를 선언하기 전에 Wi
 실행 검증이 통과해야 합니다. 서명되지 않은 설치 파일은 OS 확인을 요구할 수 있습니다.
 
 Windows에서는 PowerShell에서 `./gtmux.exe start --name local --port 9001 --workspace C:/Projects`로 압축 해제한 서버를 시작합니다. Windows 네이티브 backend 테스트와 패키징된 앱의 시작·정지·전체 종료 검사는 로컬에서 통과했습니다. macOS 실행 검사, 서명된 배포 및 실제 공개 DNS/ACME 검증은 릴리스 검증 단계로 남아 있습니다.
+
+릴리스 피드가 설정된 앱은 [자동 확인·다운로드](updates.html)를 지원하며 설치는 명시적으로 확인해야 합니다. 공개 피드가 없는 로컬 패키지는 수동으로 교체합니다.

@@ -30,6 +30,8 @@ jobs:
     env:
       CARGO_BUILD_JOBS: 2
       CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      GTMUX_RELEASE_REPOSITORY: ${{ github.repository }}
+      GTMUX_RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.85.0
@@ -48,6 +50,7 @@ jobs:
       - run: npm run build -- --outDir ../../.artifacts/frontend
         working-directory: codebase/frontend
       - run: node scripts/prepare-launcher.mjs codebase/backend/target/release/${{ matrix.binary }} .artifacts/frontend
+      - run: node scripts/release-version.mjs
       - run: npm ci
         working-directory: codebase/launcher
       - run: npm test
@@ -55,12 +58,21 @@ jobs:
       - run: node scripts/package-server.mjs ${{ matrix.label }}
       - run: npm run dist
         working-directory: codebase/launcher
-      - name: Check packaged Windows application lifecycle
-        if: runner.os == 'Windows'
-        run: npm run test:electron
+      - name: Check packaged application lifecycle
+        if: runner.os != 'Linux'
+        run: node test/package-smoke.mjs
         working-directory: codebase/launcher
-        env:
-          GTMUX_TEST_APP: ${{ github.workspace }}/codebase/launcher/dist/win-unpacked/gtmux.exe
+      - name: Check packaged Linux application lifecycle
+        if: runner.os == 'Linux'
+        run: xvfb-run --auto-servernum node test/package-smoke.mjs
+        working-directory: codebase/launcher
+      - name: Check real updater download and checksum rejection
+        if: runner.os == 'Linux'
+        run: node test/update-feed-smoke.mjs
+        working-directory: codebase/launcher
+      - name: Check local certificate issuance without public deployment
+        run: node test/local-https-smoke.mjs
+        working-directory: codebase/launcher
       - uses: actions/upload-artifact@v4
         with:
           name: gtmux-server-${{ matrix.label }}
@@ -74,5 +86,7 @@ jobs:
             codebase/launcher/dist/*.dmg
             codebase/launcher/dist/*.AppImage
             codebase/launcher/dist/*.tar.gz
+            codebase/launcher/dist/*.yml
+            codebase/launcher/dist/*.blockmap
 # Publishing and signing require a maintainer decision. This workflow only
 # produces downloadable artifacts; it never creates a release or pushes a tag.
