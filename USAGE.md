@@ -1217,3 +1217,5 @@ The application does not obtain a certificate during build or tests.
 Configuration sample reference pages are regenerated on every website build.
 CI requires English documentation changes and corresponding Korean updates for
 code changes; reviewers still verify accuracy and translation meaning.
+
+Unread counts in browser tab titles are off by default. Enable **Settings → Appearance → Terminal activity → Unread in browser tab** to restore them; also enable Terminal activity, Unread output and Browser tab indicators. The Activity list still shows unread output independently. To restore a hidden sidebar list, enable Activity list in the same section.

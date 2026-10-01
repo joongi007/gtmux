@@ -21,3 +21,7 @@ The server drains HTTP and WebSocket connections, blocks late terminal spawns, r
 ## Recovery
 
 The manager shows the configuration and log paths. Tokens are redacted from managed server logs. If startup fails, inspect the error before retrying. A shutdown timeout is reported; the manager does not silently force termination. For stale attach ownership, the server keeps the lock inode stable and cleans only its own disconnected owners; never delete a live `.lock` file to force entry.
+
+## Restore hidden activity indicators
+
+In the workspace, open Settings → Appearance → Terminal activity. Enable Activity list to restore the sidebar tab. Unread in browser tab is off by default; turn it on together with Unread output and Browser tab indicators to include unread counts in the title. Hiding indicators retains formats and saved sidebar widths.

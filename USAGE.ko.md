@@ -1150,3 +1150,5 @@ backend 참조를 보유한 경우 blocking thread에서 `PtyBackend::shutdown`�
 
 설정 샘플 참조 페이지는 문서 빌드 때 자동 생성합니다. 코드 변경 시 영문 문서와
 대응하는 한글 변경을 CI에서 요구합니다. 내용 정확성과 번역 의미는 리뷰로 확인합니다.
+
+브라우저 탭 제목의 unread 개수는 기본적으로 숨깁니다. **Settings → Appearance → Terminal activity → Unread in browser tab**을 켜면 다시 표시됩니다. Terminal activity, Unread output, Browser tab indicators도 켜져 있어야 합니다. Activity 목록의 unread 표시는 별도로 유지됩니다. 숨긴 사이드바 목록은 같은 위치의 Activity list를 켜서 복원합니다.

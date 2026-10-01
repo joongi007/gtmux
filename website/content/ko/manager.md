@@ -21,3 +21,7 @@
 ## 문제 해결
 
 관리 화면에 설정·로그 경로가 표시됩니다. 서버 로그의 접속 토큰은 가립니다. 시작 실패 시 오류를 확인하고 다시 시도합니다. 종료 시간 초과는 표시하며 조용히 강제 종료하지 않습니다. attach 소유권은 lock inode를 유지하며 서버 소유의 끊어진 연결만 정리합니다. 접속을 강제하기 위해 실행 중인 `.lock` 파일을 삭제하지 않습니다.
+
+## 숨긴 Activity 표시 복원
+
+워크스페이스의 Settings → Appearance → Terminal activity에서 Activity list를 켜면 사이드바 탭이 복원됩니다. Unread in browser tab은 기본 off이며, Unread output 및 Browser tab indicators와 함께 켜면 제목에 unread 개수가 나타납니다. 표시를 꺼도 포맷과 저장된 사이드바 폭은 유지됩니다.

@@ -48,7 +48,7 @@ describe('terminal activity', () => {
     for (const patch of [{ enabled: false }, { tab: false }]) {
       expect(activityTitle('gtmux', new Set(['a']), [row], 's', acks, { ...prefs, ...patch })).toBe('gtmux');
     }
-    expect(activityTitle('gtmux', new Set(['a']), [row], 's', acks, { ...prefs, completed: false })).toBe('[1 unread] gtmux');
+    expect(activityTitle('gtmux', new Set(['a']), [row], 's', acks, { ...prefs, completed: false, tabUnread: true })).toBe('[1 unread] gtmux');
   });
   it('rejects malformed snapshots rather than showing inaccurate badges', () => {
     expect(parseActivitySnapshot({ server_id: 's', terminals: [row] }).terminals).toEqual([row]);
@@ -82,5 +82,18 @@ describe('activity title formats', () => {
   });
   it('falls back safely when a saved format is malformed', () => {
     expect(parseActivityPreferences('{"version":1,"enabled":true,"titleFormat":"{bad}"}')).toEqual(prefs);
+  });
+});
+
+ describe('unread tab opt-in', () => {
+  it('keeps list notices while hiding unread title counts by default, including older preferences', () => {
+    const p = parseActivityPreferences('{"version":1,"enabled":true,"completed":false,"unread":true}');
+    const acks = { [activityKey('s', row)]: ack };
+    expect(activityNotice(row, ack, p).unread).toBe(true);
+    expect(activityTitle('gtmux', new Set(['a']), [row], 's', acks, p)).toBe('gtmux');
+    const optedIn = parseActivityPreferences(JSON.stringify({ version: 1, ...p, tabUnread: true }));
+    expect(activityTitle('gtmux', new Set(['a']), [row], 's', acks, optedIn)).toBe('[1 unread] gtmux');
+    expect(activityTitle('gtmux', new Set(['a']), [row], 's', acks, { ...optedIn, tabUnread: false })).toBe('gtmux');
+    expect(formatActivityTitle('gtmux', { waiting: 0, done: 0, unread: 1 }, p)).toBe('gtmux');
   });
 });

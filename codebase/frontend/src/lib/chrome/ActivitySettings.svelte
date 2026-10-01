@@ -40,6 +40,7 @@
     { key: 'needs_input', label: 'Input needed', description: 'Show reported input waits and estimated confirmation prompts.' },
     { key: 'unread', label: 'Unread output', description: 'Track output you have not acknowledged in this browser tab.' },
     { key: 'list', label: 'Activity list', description: 'Add Activity beside Layers, Terminals and Files.' },
+    { key: 'tabUnread', label: 'Unread in browser tab', description: 'Include unread counts in the tab title. Off by default; the Activity list keeps its own unread indicators.' },
     { key: 'tab', label: 'Browser tab indicators', description: 'Add pending counts for this session to its browser tab title.' },
   ];
   function toggle(key: ActivityToggle, input: HTMLInputElement): void {
@@ -53,10 +54,11 @@
     <label class="row">
       <span><span class="label">{option.label}</span><span class="hint">{option.description}</span></span>
       <SettingsSwitch checked={terminalActivity.preferences[option.key]}
-        disabled={option.key !== 'enabled' && !terminalActivity.preferences.enabled}
+        disabled={(option.key !== 'enabled' && !terminalActivity.preferences.enabled) || (option.key === 'tabUnread' && (!terminalActivity.preferences.tab || !terminalActivity.preferences.unread))}
         onchange={(event) => toggle(option.key, event.currentTarget)} />
     </label>
   {/each}
+  <p class="hint">Hidden the Activity list or tab indicators? Return to Settings → Appearance → Terminal activity to turn them back on. Your formats and sidebar widths are kept.</p>
   <div class="formats">
     {#each formats as format (format.key)}
       <div class="format-row">

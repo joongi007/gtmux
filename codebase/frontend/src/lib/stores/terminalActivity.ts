@@ -11,6 +11,7 @@ export interface ActivityPreferences {
   completed: boolean;
   needs_input: boolean;
   unread: boolean;
+  tabUnread: boolean;
   list: boolean;
   tab: boolean;
   titleFormat: string;
@@ -18,7 +19,7 @@ export interface ActivityPreferences {
   inputFormat: string;
   unreadFormat: string;
 }
-export type ActivityToggle = 'enabled' | 'completed' | 'needs_input' | 'unread' | 'list' | 'tab';
+export type ActivityToggle = 'enabled' | 'completed' | 'needs_input' | 'unread' | 'list' | 'tab' | 'tabUnread';
 export type ActivityFormat = 'titleFormat' | 'completedFormat' | 'inputFormat' | 'unreadFormat';
 export const ACTIVITY_FORMAT_MAX_LENGTH = 120;
 export function validateActivityFormat(key: ActivityFormat, value: string): string | null {
@@ -35,7 +36,7 @@ export function validateActivityFormat(key: ActivityFormat, value: string): stri
 }
 export const ACTIVITY_STORAGE_KEY = 'gtmux-terminal-activity:v1';
 export const DEFAULT_ACTIVITY_PREFERENCES: Readonly<ActivityPreferences> = {
-  enabled: false, completed: true, needs_input: true, unread: true, list: true, tab: true,
+  enabled: false, completed: true, needs_input: true, unread: true, list: true, tab: true, tabUnread: false,
   titleFormat: '[{activity}] {title}', completedFormat: '{count} done',
   inputFormat: '{count} input', unreadFormat: '{count} unread',
 };
@@ -46,7 +47,7 @@ export function parseActivityPreferences(raw: string | null): ActivityPreference
   try {
     const value: unknown = JSON.parse(raw ?? 'null');
     if (!value || typeof value !== 'object' || !('version' in value) || value.version !== 1) return defaults;
-    for (const key of ['enabled', 'completed', 'needs_input', 'unread', 'list', 'tab'] as ActivityToggle[]) {
+    for (const key of ['enabled', 'completed', 'needs_input', 'unread', 'list', 'tab', 'tabUnread'] as ActivityToggle[]) {
       if (key in value && typeof value[key as keyof typeof value] === 'boolean') {
         defaults[key] = value[key as keyof typeof value] as boolean;
       }
@@ -108,7 +109,7 @@ export function activityTitle(base: string, terminalIds: Set<string>, rows: Acti
     const notice = activityNotice(row, acks[activityKey(serverId, row)], prefs);
     if (notice.needs_input) waiting++;
     else if (notice.completed) done++;
-    else if (notice.unread) unread++;
+    else if (notice.unread && prefs.tabUnread) unread++;
   }
   return formatActivityTitle(base, { waiting, done, unread }, prefs);
 }
@@ -117,7 +118,7 @@ export function formatActivityTitle(base: string, counts: { waiting: number; don
   const formatCount = (format: string, count: number) => format.replaceAll('{count}', String(count));
   const parts = [counts.waiting ? formatCount(prefs.inputFormat, counts.waiting) : '',
     counts.done ? formatCount(prefs.completedFormat, counts.done) : '',
-    counts.unread ? formatCount(prefs.unreadFormat, counts.unread) : ''].filter(Boolean);
+    prefs.tabUnread && counts.unread ? formatCount(prefs.unreadFormat, counts.unread) : ''].filter(Boolean);
   if (!parts.length) return base;
   // One pass: braces in session names/custom text must remain literal.
   return prefs.titleFormat.replace(/\{(title|activity)\}/g, (_, key) => key === 'title' ? base : parts.join(', '));
