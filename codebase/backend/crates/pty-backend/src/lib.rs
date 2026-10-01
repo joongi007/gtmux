@@ -619,6 +619,7 @@ struct PtyBackendInner {
     /// the boot-time scanner's signal that a stray process belongs to our
     /// gtmux. `None` in unit tests where the marker is irrelevant.
     session_marker: Option<String>,
+    server_endpoint: Option<String>,
 }
 
 impl std::fmt::Debug for PaneHandle {
@@ -651,6 +652,11 @@ impl PtyBackend {
     /// scanner uses these markers to identify stray processes from a crashed
     /// prior Server instance.
     pub fn with_session(session_marker: Option<String>) -> Self {
+        Self::with_session_endpoint(session_marker, None)
+    }
+
+    /// Supply the effective loopback endpoint for hooks when config/CLI overrides differ.
+    pub fn with_session_endpoint(session_marker: Option<String>, server_endpoint: Option<String>) -> Self {
         let (notify_tx, _) = broadcast::channel(BROADCAST_CAPACITY);
         Self {
             inner: Arc::new(PtyBackendInner {
@@ -659,6 +665,7 @@ impl PtyBackend {
                 next_id: AtomicU64::new(1),
                 notify_tx,
                 session_marker,
+                server_endpoint,
             }),
         }
     }
@@ -995,6 +1002,7 @@ fn spawn_inner(
         cmd.env("GTMUX_SERVER_INSTANCE", instance);
         cmd.env("GTMUX_SESSION", instance);
     }
+    if let Some(endpoint) = inner.server_endpoint.as_deref() { cmd.env("GTMUX_SERVER_URL", endpoint); }
     cmd.env("GTMUX_SERVER_PID", std::process::id().to_string());
 
     // User-supplied env overrides anything inherited.

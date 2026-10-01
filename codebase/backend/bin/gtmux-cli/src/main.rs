@@ -31,6 +31,7 @@ mod ansi;
 mod http;
 mod process_audit;
 mod remote;
+mod agent;
 mod skill;
 mod state_files;
 
@@ -187,6 +188,11 @@ enum Cmd {
     Layout {
         #[command(subcommand)]
         command: remote::LayoutCmd,
+    },
+    /// Generate observational agent hooks or report an agent lifecycle event.
+    Agent {
+        #[command(subcommand)]
+        command: agent::AgentCmd,
     },
     /// Terminal lifecycle: spawn/mount/unmount panels, kill/list the pool
     /// (ADR-0053 D11).
@@ -383,6 +389,7 @@ fn main() -> ExitCode {
         } => remote::run_session_delete(session, yes, password, instance),
         Cmd::Session { command } => session_cmd(command),
         Cmd::Layout { command } => remote::run_layout(command),
+        Cmd::Agent { command } => agent::run(command),
         Cmd::Terminal { command } => remote::run_terminal(command),
         Cmd::Workspace { command } => remote::run_workspace(command),
         Cmd::Fs { command } => remote::run_fs(command),
@@ -543,7 +550,9 @@ async fn start(args: StartArgs) -> anyhow::Result<ExitCode> {
     //    + `GTMUX_SERVER_PID=<pid>` so the
     //    boot-time orphan scanner (ADR-0014 D11) can identify strays
     //    from a previous crashed Server.
-    let backend = PtyBackend::with_session(Some(config.server.session.clone()));
+    let hook_endpoint = config.server.bind.parse::<std::net::IpAddr>().ok().filter(|ip| ip.is_loopback() || ip.is_unspecified())
+        .map(|ip| format!("http://{}:{}", if ip.is_ipv6() { "[::1]" } else { "127.0.0.1" }, config.server.port));
+    let backend = PtyBackend::with_session_endpoint(Some(config.server.session.clone()), hook_endpoint);
     info!("pty backend ready (ADR-0013 + ADR-0014 supervisor model)");
 
     // 6) token — ADR-0003 D13.1:
