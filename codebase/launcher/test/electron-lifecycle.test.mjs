@@ -4,6 +4,7 @@ import vm from 'node:vm';
 import { readFile } from 'node:fs/promises';
 import { EventEmitter } from 'node:events';
 import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
 const require = createRequire(import.meta.url);
 const source = await readFile(new URL('../src/electron.cjs', import.meta.url), 'utf8');
 function harness() {
@@ -21,7 +22,7 @@ function harness() {
     async loadURL() {}
     close() { this.destroyed = true; this.emit('closed'); }
   }
-  const context = vm.createContext({ require: name => name === 'electron' ? { app, BrowserWindow: Window } : require(name), process: { env: {} }, URL });
+  const context = vm.createContext({ __dirname: fileURLToPath(new URL('../src/', import.meta.url)), require: name => name === 'electron' ? { app, BrowserWindow: Window } : require(name), process: { env: {} }, URL });
   vm.runInContext(source + '\nglobalThis.state = { openWorkspace, setManager: w => managerWindow = w, workspace: () => workspaceWindow, quitting: () => quitting = true, pending: () => quitPending = true };', context);
   return { ...context.state, Window, app };
 }

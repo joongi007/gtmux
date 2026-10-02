@@ -72,6 +72,7 @@
       "oneClick": false,
       "allowToChangeInstallationDirectory": true
     },
-    "publish": null
+    "publish": null,
+    "icon": "ui/icon.png"
   }
 }

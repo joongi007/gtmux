@@ -27,3 +27,5 @@
 Windows 경로도 선택·결합·복사·워크스페이스 상대 경로 변환 후 유효해야 합니다.
 
 관리 화면은 워크스페이스의 원본 디자인 토큰을 가져오며 패키지에도 같은 CSS를 포함합니다. 실행 UI는 영어이고 현재 다국어 대상은 문서입니다. 브라우저 회귀 검사에서 슬라이드 스위치·700px 관리 창·밝은/어두운 테마·키보드 크기 조절·Activity 폭 복원을 확인합니다.
+
+데스크톱 창·트레이·실행 파일·설치 프로그램에는 기존 gtmux 로고를 사용합니다. 패키지 아이콘은 워크스페이스의 `brand.png`를 그대로 복사한 `codebase/launcher/ui/icon.png`이며 `tray.png`는 32px favicon입니다. 서명 없는 Windows 확인용 빌드는 `signExecutable: false`로 서명만 생략합니다. `signAndEditExecutable: false`는 리소스 편집도 생략하여 Electron 기본 아이콘을 남기므로 사용하지 않습니다.

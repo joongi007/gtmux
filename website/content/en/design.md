@@ -28,3 +28,5 @@ errors and empty states. Windows filesystem paths must remain valid when selecte
 joined, copied or converted into workspace-relative references.
 
 The manager imports the canonical workspace tokens; packaged resources include the same CSS. Runtime interface text is English. Only documentation is translated at this stage. Browser regression checks exercise slide switches, a 700px manager window, both themes, keyboard resizing and Activity width restoration.
+
+The desktop window, tray, executable and installer use the existing gtmux brand mark. The package icon source is `codebase/launcher/ui/icon.png`, copied unchanged from the workspace `brand.png`; `tray.png` comes from its 32px favicon. When making an unsigned Windows review build, disable signing with `signExecutable: false`; do not disable executable resource editing with `signAndEditExecutable: false`, which leaves the Electron icon in place.

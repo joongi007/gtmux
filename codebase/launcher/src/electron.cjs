@@ -1,6 +1,8 @@
 const { app, BrowserWindow, Tray, Menu, nativeImage, shell, dialog } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs/promises');
+const appIcon = path.join(__dirname, '../ui/icon.png');
+if (process.platform === 'win32') app.setAppUserModelId('dev.gtmux.desktop');
 if (process.env.GTMUX_DESKTOP_DATA_DIR) {
   if (!path.isAbsolute(process.env.GTMUX_DESKTOP_DATA_DIR)) throw new Error('GTMUX_DESKTOP_DATA_DIR must be absolute.');
   app.setPath('userData', process.env.GTMUX_DESKTOP_DATA_DIR);
@@ -37,7 +39,7 @@ async function boot() {
       if (!preferences.background && tray) { tray.destroy(); tray = null; }
     } });
   managerWindow = new BrowserWindow({ width: 1080, height: 820, minWidth: 660, minHeight: 600,
-    title: 'gtmux · Server manager', autoHideMenuBar: true,
+    title: 'gtmux · Server manager', icon: appIcon, autoHideMenuBar: true,
     webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true } });
   protect(managerWindow, new URL(control.url).origin);
   const manager = managerWindow;
@@ -64,7 +66,7 @@ async function openWorkspace(url, mode) {
   if (mode === 'app' || mode === 'both') {
     if (workspaceWindow && !workspaceWindow.isDestroyed() && workspaceWindow.allowedOrigin !== parsed.origin) workspaceWindow.close();
     if (!workspaceWindow || workspaceWindow.isDestroyed()) {
-      workspaceWindow = new BrowserWindow({ width: 1400, height: 900, title: 'gtmux', autoHideMenuBar: true,
+      workspaceWindow = new BrowserWindow({ width: 1400, height: 900, title: 'gtmux', icon: appIcon, autoHideMenuBar: true,
         webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true } });
       workspaceWindow.allowedOrigin = parsed.origin;
       protect(workspaceWindow, parsed.origin);
@@ -78,7 +80,7 @@ async function openWorkspace(url, mode) {
 }
 function createTray() {
   if (tray) return;
-  // A small neutral template icon, visible on both light and dark system trays.
+  // Use the same gtmux mark as the workspace favicon and application icon.
   const icon = nativeImage.createFromPath(path.join(__dirname, '../ui/tray.png'));
   tray = new Tray(icon); tray.setToolTip('gtmux server manager');
   tray.setContextMenu(Menu.buildFromTemplate([
