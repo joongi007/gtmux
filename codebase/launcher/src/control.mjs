@@ -41,8 +41,9 @@ export async function controlServer({ supervisor, proxy, platform = process.plat
       switch (url.pathname) {
         case '/api/workspace/choose':
           if (!onChooseWorkspace) throw new Error('Folder selection is available in the desktop app. Enter the server folder path directly here.');
-          if (supervisor.status().configured) throw new Error('Change an existing workspace in Settings → Server.');
+          if (supervisor.status().pid) throw new Error('Stop the server before choosing a different workspace.');
           result = await onChooseWorkspace(data.path); break;
+        case '/api/config/workspace': result = await supervisor.savedWorkspace(); break;
         case '/api/config/port': result = data.port === undefined ? await supervisor.savedPort() : await supervisor.changePort(data); break;
         case '/api/agent/preview': result = await integrations.preview(data.agent, data.remove === true); break;
         case '/api/agent/apply': result = await integrations.apply(data); break;

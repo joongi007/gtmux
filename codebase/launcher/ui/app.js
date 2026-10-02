@@ -1,5 +1,5 @@
 const $ = id => document.getElementById(id);
-let status, plan, pendingAction, busy = false, populated = false, proxyPopulated = false, portRevision = null, agentPlan = null;
+let status, plan, pendingAction, busy = false, populated = false, proxyPopulated = false, portRevision = null, workspaceRevision = null, agentPlan = null;
 async function request(path, data) {
   const response = await fetch(`/api/${path}`, data === undefined ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
   const result = await response.json(); if (!response.ok) throw new Error(result.error || `Request failed (${response.status})`); return result;
@@ -10,14 +10,20 @@ async function refresh() {
   for (const id of ['state', 'address', 'config', 'log']) $(id).textContent = ({ state: status.state, address: status.address, config: status.configPath, log: status.logPath })[id] || '—';
   if (status.preferences && !populated) {
     for (const [key, value] of Object.entries(status.preferences)) { const field = $('setup').elements.namedItem(key); if (field) { if (field.type === 'checkbox') field.checked = value; else field.value = value; } }
+    if (status.configured) {
+      const saved = await request('config/workspace', {});
+      $('setup').elements.workspace.value = saved.workspace; workspaceRevision = saved.revision;
+    }
     populated = true;
   }
   $('setup').elements.port.disabled = status.configured;
-  $('setup').elements.workspace.disabled = status.configured;
+  $('setup').elements.workspace.disabled = busy || Boolean(status.pid);
+  $('workspace-reload').hidden = !status.configured;
+  $('workspace-reload').disabled = busy || Boolean(status.pid);
   $('workspace-browse').hidden = !status.workspacePicker;
-  $('workspace-browse').disabled = busy || status.configured;
+  $('workspace-browse').disabled = busy || Boolean(status.pid);
   $('workspace-help').textContent = status.workspacePicker ? 'The starting folder for your projects. Type a path or choose a folder.' : 'The starting folder for your projects. Enter an absolute folder path on the server.';
-  $('config-hint').textContent = status.configured ? 'Change the server port or workspace in the workspace Settings → Server, then restart here. Your TOML edits are preserved.' : '';
+  $('config-hint').textContent = status.configured ? (status.pid ? 'Stop the server to change its workspace folder.' : 'Change the workspace folder and choose Save setup. Reload reads the saved path from TOML. Existing sessions keep their folders.') : '';
   $('start').disabled = busy || !status.configured || Boolean(status.pid);
   $('open').disabled = busy || status.state !== 'running';
   $('stop').disabled = busy || !status.pid; $('restart').disabled = busy || !status.pid;
@@ -62,7 +68,8 @@ document.querySelectorAll('[data-section]').forEach(button => button.addEventLis
   for (const id of ['server', 'exposure', 'agents', 'updates']) $(id).hidden = id !== button.dataset.section;
 }));
 $('setup').addEventListener('submit', event => { event.preventDefault(); const form = $('setup').elements;
-  void action(() => request('configure', { mode: form.mode.value, port: Number(form.port.value), workspace: form.workspace.value, background: form.background.checked, theme: form.theme.value }), 'Setup saved.'); });
+  void action(async () => { await request('configure', { mode: form.mode.value, port: Number(form.port.value), workspace: form.workspace.value, background: form.background.checked, theme: form.theme.value, revision: workspaceRevision }); populated = false; }, 'Setup saved.'); });
+$('workspace-reload').onclick = () => action(async () => { const saved = await request('config/workspace', {}); $('setup').elements.workspace.value = saved.workspace; workspaceRevision = saved.revision; }, 'Workspace reloaded.');
 $('workspace-browse').onclick = async () => { const selection = await action(async () => {
   const field = $('setup').elements.workspace;
   const result = await request('workspace/choose', {path: field.value});

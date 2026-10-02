@@ -54,3 +54,19 @@ test('startup port recovery rejects running servers and external edits', async t
   assert((await readFile(manager.configPath,'utf8')).includes('# external edit'));
   await manager.start(); assert.equal(manager.phase,'running');
 });
+
+test('saved workspace can be changed while stopped without replacing unrelated TOML', async t => {
+  const manager = await fixture(t);
+  const before = await readFile(manager.configPath,'utf8');
+  await writeFile(manager.configPath,before+'\n# keep my configuration\n');
+  const saved = await manager.savedWorkspace();
+  await manager.configure({...manager.preferences,workspace:tmpdir(),revision:saved.revision});
+  assert.equal((await manager.config()).server_workspace,tmpdir());
+  assert.equal((await manager.config()).default_session_workspace,tmpdir());
+  assert.equal((await manager.config()).workspace_path,join(manager.root,'store'));
+  assert((await readFile(manager.configPath,'utf8')).includes('# keep my configuration'));
+  await assert.rejects(manager.configure({...manager.preferences,workspace:manager.root,revision:saved.revision}),/changed/i);
+  const fresh = await manager.savedWorkspace();
+  await manager.start();
+  await assert.rejects(manager.configure({...manager.preferences,workspace:manager.root,revision:fresh.revision}),/Stop/);
+});

@@ -4,7 +4,7 @@ import { mkdir, stat, appendFile } from 'node:fs/promises';
 import { resolve, join, isAbsolute } from 'node:path';
 import { createServer } from 'node:net';
 import { parse, stringify } from 'smol-toml';
-import { replaceStartupPort } from './startup-config.mjs';
+import { replaceStartupPort, replaceStartupWorkspace } from './startup-config.mjs';
 import { atomicWrite, readOptional, revision } from './files.mjs';
 
 export async function checkPort(port, host = '127.0.0.1') {
@@ -57,14 +57,26 @@ export class Supervisor extends EventEmitter {
     if (this.child && (next.port !== this.preferences.port || next.workspace !== this.preferences.workspace))
       throw new Error('Stop the server before changing its startup port or workspace. Running programs will end.');
     const existing = await readOptional(this.configPath);
-    if (existing && (next.port !== this.preferences?.port || next.workspace !== this.preferences?.workspace))
+    if (existing && next.port !== this.preferences?.port)
       throw new Error('This server already has a TOML configuration. Change its port/workspace in Settings → Server, then restart.');
+    if (existing && next.workspace !== this.preferences?.workspace) {
+      if (revision(existing) !== value.revision) throw new Error('Configuration changed on disk. Reload the workspace and try again.');
+      const edited = replaceStartupWorkspace(existing, await this.serverPath(next.workspace));
+      if (revision(await readOptional(this.configPath)) !== value.revision) throw new Error('Configuration changed while saving. Reload and retry.');
+      await atomicWrite(this.configPath, edited);
+    }
     if (!existing) await atomicWrite(this.configPath, stringify({ schema_version: 1, frontend_dist: await this.serverPath(this.frontend),
       server_workspace: await this.serverPath(next.workspace), default_session_workspace: await this.serverPath(next.workspace),
       workspace_path: await this.serverPath(join(this.root, 'store')), server: { session: 'desktop', port: next.port, bind: '127.0.0.1' } }));
     await atomicWrite(join(this.root, 'preferences.json'), JSON.stringify(next, null, 2));
     this.preferences = next; this.changed(); return this.status();
   }); }
+  async savedWorkspace() {
+    const text = await readOptional(this.configPath);
+    if (!text || !this.preferences) throw new Error('Complete setup first.');
+    const config = parse(text);
+    return { workspace: config.server_workspace ? await this.hostPath(config.server_workspace) : this.preferences.workspace, revision: revision(text) };
+  }
   async savedPort() {
     const text = await readOptional(this.configPath);
     if (!text) throw new Error('Complete setup first.');

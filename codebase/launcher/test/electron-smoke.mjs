@@ -1,6 +1,6 @@
 // Run against an unpacked package. Creates its own application profile and server.
 import { _electron as electron } from 'playwright';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createServer } from 'node:net';
@@ -38,6 +38,21 @@ try {
   assert.equal(calls.length,2);assert.deepEqual(calls[0].properties,['openDirectory']);assert.equal(calls[0].defaultPath,root);
   await page.locator('[name="port"]').fill(String(port));
   await page.getByRole('button', { name: 'Save setup', exact: true }).click();
+  await page.waitForFunction(()=>!document.querySelector('#workspace-browse').disabled);
+  await page.reload();
+  await page.waitForFunction(()=>!document.querySelector('#workspace-browse').disabled);
+  const nextWorkspace = join(root,'projects'); await mkdir(nextWorkspace);
+  await app.evaluate(({dialog},folder)=>{
+    globalThis.originalFolderDialog=dialog.showOpenDialog;
+    dialog.showOpenDialog=async()=>({canceled:false,filePaths:[folder]});
+  },nextWorkspace);
+  await page.locator('#workspace-browse').click();
+  await page.waitForFunction(expected=>document.querySelector('[name="workspace"]').value===expected,nextWorkspace);
+  await app.evaluate(({dialog})=>{dialog.showOpenDialog=globalThis.originalFolderDialog;});
+  await page.getByRole('button', { name: 'Save setup', exact: true }).click();
+  await page.waitForFunction(()=>document.querySelector('#message').textContent==='Setup saved.');
+  await page.reload();
+  await page.waitForFunction(expected=>document.querySelector('[name="workspace"]').value===expected,nextWorkspace);
   await page.getByRole('button', { name: 'Start server', exact: true }).click();
   await page.locator('#state').filter({ hasText: /^running$/ }).waitFor({ timeout: 30000 });
   const next = app.waitForEvent('window');

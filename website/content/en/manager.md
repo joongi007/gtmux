@@ -8,7 +8,7 @@ Choose an absolute workspace folder, port from 1024 to 65535, presentation mode,
 
 ## Configuration
 
-The first setup writes the manager-owned TOML. Later startup changes belong in workspace Settings → Server. Common fields and the advanced editor retain drafts across navigation. Saving requires the current token/password, detects external edits, and reports write failures. Behavior applies after a successful save; other startup settings load after restart. Appearance preferences stay browser-local.
+The first setup writes the manager-owned TOML. After setup, stop the server to change its workspace folder here, then choose **Save setup**. **Reload** reads the path from TOML after external edits. Existing sessions and the Store keep their locations; an independently configured default session folder is preserved. Other server settings belong in workspace Settings → Server. Common fields and the advanced editor retain drafts across navigation. Saving requires the current token/password, detects external edits, and reports write failures. Behavior applies after a successful save; other startup settings load after restart. Appearance preferences stay browser-local.
 
 The manager reads the saved TOML again on start. Existing configurations are not replaced when switching presentation mode or background preference.
 
