@@ -10,11 +10,12 @@ const equal = (a, b) => typeof a === 'string' && a.length === b.length && timing
 export async function controlServer({ supervisor, proxy, platform = process.platform, onOpen, onPreferences, onChooseWorkspace, updates, designTokens = new URL('../../frontend/src/styles/tokens.css', import.meta.url), settingsControls = new URL('../../frontend/src/styles/settings-controls.css', import.meta.url) }) {
   const integrations = new AgentInstall(supervisor);
   let operation = Promise.resolve();
-  async function openWorkspace() {
+  async function openWorkspace({ newWindow = false } = {}) {
+    if (newWindow && !onOpen) throw new Error('New app windows require the desktop app.');
     await supervisor.start();
     if ((await proxy.status()).configuration?.mode === 'managed') await proxy.start();
     const url = proxy.workspaceURL ? await proxy.workspaceURL() : supervisor.openURL();
-    if (onOpen) { await onOpen(url, supervisor.preferences.mode); return { opened: true }; }
+    if (onOpen) { await onOpen(url, newWindow ? 'app' : supervisor.preferences.mode, { newWindow }); return { opened: true }; }
     return { url };
   }
 
@@ -71,7 +72,7 @@ export async function controlServer({ supervisor, proxy, platform = process.plat
           if (!data.confirmed) throw new Error('Confirm that running terminal programs will end.');
           await supervisor.stop(data.credential); await proxy.stop(); result = await supervisor.start();
           if ((await proxy.status()).configuration?.mode === 'managed') await proxy.start(); break;
-        case '/api/open': result = await openWorkspace(); break;
+        case '/api/open': result = await openWorkspace({newWindow: data.newWindow === true}); break;
         case '/api/proxy/install': result = await proxy.install(); break;
         case '/api/proxy/preview': result = await proxy.preview(data); break;
         case '/api/proxy/apply': result = await proxy.apply(data); break;
@@ -89,7 +90,7 @@ export async function controlServer({ supervisor, proxy, platform = process.plat
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
   origin = `http://127.0.0.1:${server.address().port}`;
   cookieName = `gtmux_manager_${server.address().port}`;
-  return { server, origin, openWorkspace: () => {
-    const pending = operation.then(openWorkspace); operation = pending.catch(() => {}); return pending;
+  return { server, origin, openWorkspace: (options) => {
+    const pending = operation.then(() => openWorkspace(options)); operation = pending.catch(() => {}); return pending;
   }, url: `${origin}/?token=${secret}`, close: () => new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve())) };
 }

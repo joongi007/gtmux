@@ -8,6 +8,7 @@ if (process.env.GTMUX_DESKTOP_DATA_DIR) {
   app.setPath('userData', process.env.GTMUX_DESKTOP_DATA_DIR);
 }
 let managerWindow, workspaceWindow, tray, control, supervisor, proxy, updates, quitting = false, quitPending = false;
+const workspaceWindows = new Set();
 if (!app.requestSingleInstanceLock()) app.quit();
 else {
   app.on('second-instance', showManager);
@@ -55,34 +56,53 @@ async function boot() {
   manager.on('close', event => {
     if (quitting) return;
     event.preventDefault();
-    if (supervisor.preferences?.background && tray) manager.hide(); else app.quit();
+    if (workspaceWindows.size || (supervisor.preferences?.background && tray)) manager.hide(); else app.quit();
   });
   await manager.loadURL(control.url);
   if (!quitting && !quitPending && supervisor.preferences?.background) createTray();
 }
 function protect(window, origin) {
+  window.webContents.on('before-input-event', (event, input) => {
+    const modifier = process.platform === 'darwin' ? input.meta && !input.control : input.control && !input.meta;
+    if (input.type === 'keyDown' && modifier && !input.shift && !input.alt && !input.isAutoRepeat && input.key.toLowerCase() === 'n') {
+      event.preventDefault();
+      void control.openWorkspace({newWindow:true}).catch(error => dialog.showErrorBox('gtmux', error.message));
+    }
+  });
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   window.webContents.on('will-navigate', (event, url) => { if (new URL(url).origin !== origin) event.preventDefault(); });
   window.webContents.session.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
   window.webContents.on('will-attach-webview', event => event.preventDefault());
 }
-async function openWorkspace(url, mode) {
+async function openWorkspace(url, mode, { newWindow = false } = {}) {
   if (quitting || quitPending) throw new Error('Application is shutting down.');
   const parsed = new URL(url);
   if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('Unsupported workspace URL.');
   if (mode === 'web' || mode === 'both') await shell.openExternal(url);
   if (mode === 'app' || mode === 'both') {
-    if (workspaceWindow && !workspaceWindow.isDestroyed() && workspaceWindow.allowedOrigin !== parsed.origin) workspaceWindow.close();
-    if (!workspaceWindow || workspaceWindow.isDestroyed()) {
-      workspaceWindow = new BrowserWindow({ width: 1400, height: 900, title: 'gtmux', icon: appIcon, autoHideMenuBar: true,
+    let workspace = !newWindow && workspaceWindow && !workspaceWindow.isDestroyed() && workspaceWindow.allowedOrigin === parsed.origin ? workspaceWindow : null;
+    if (!workspace && !newWindow) workspace = [...workspaceWindows].find(window => !window.isDestroyed() && window.allowedOrigin === parsed.origin);
+    if (!workspace) {
+      workspace = new BrowserWindow({ width: 1400, height: 900, title: 'gtmux', icon: appIcon, autoHideMenuBar: true,
         webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true } });
-      workspaceWindow.allowedOrigin = parsed.origin;
-      protect(workspaceWindow, parsed.origin);
-      const workspace = workspaceWindow;
-      workspace.on('closed', () => { if (workspaceWindow === workspace) workspaceWindow = null; showManager(); });
+      workspace.allowedOrigin = parsed.origin;
+      workspaceWindows.add(workspace);
+      protect(workspace, parsed.origin);
+      const created = workspace;
+      created.on('focus', () => { workspaceWindow = created; });
+      created.on('closed', () => {
+        workspaceWindows.delete(created);
+        if (workspaceWindow === created) workspaceWindow = [...workspaceWindows].at(-1) ?? null;
+        if (!workspaceWindows.size) showManager();
+      });
     }
-    const workspace = workspaceWindow;
-    await workspace.loadURL(url);
+    workspaceWindow = workspace;
+    // Focusing an existing session must not reload it. A restarted server issues
+    // a new bootstrap token, which does require a fresh authentication navigation.
+    if (workspace.bootstrapURL !== url) {
+      await workspace.loadURL(url);
+      workspace.bootstrapURL = url;
+    }
     if (!quitting && !quitPending && !workspace.isDestroyed()) { if (workspace.isMinimized()) workspace.restore(); workspace.show(); workspace.focus(); }
   }
 }
@@ -94,6 +114,7 @@ function createTray() {
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: 'Show server controls', click: showManager },
     { label: 'Open workspace', click: () => (async () => { await control.openWorkspace(); })().catch(e => dialog.showErrorBox('gtmux', e.message)) },
+    { label: 'New app window', click: () => control.openWorkspace({newWindow:true}).catch(error => dialog.showErrorBox('gtmux', error.message)) },
     { type: 'separator' }, { label: 'Quit and stop server', click: () => app.quit() }
   ]));
   tray.on('click', showManager);

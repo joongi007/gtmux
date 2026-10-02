@@ -62,24 +62,53 @@ try {
   await workspace.getByRole('button', {name:'Open existing',exact:false}).waitFor();
   assert.equal(new URL(workspace.url()).hostname, '127.0.0.1');
   assert.equal(await workspace.evaluate(() => typeof window.require), 'undefined');
+  const created = await workspace.evaluate(async root => {
+    const statuses=[];
+    for (const name of ['window-one','window-two']) {
+      const response=await fetch('/api/sessions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,workspace_root:root,confirm:true})});
+      statuses.push(response.status);
+    }
+    return statuses;
+  },nextWorkspace);
+  assert(created.every(status=>status>=200&&status<300));
+  await workspace.getByRole('button',{name:'Open existing',exact:false}).click();
+  await workspace.locator('.session-name').filter({hasText:/^window-one$/}).click();
+  await workspace.getByLabel('Left panel',{exact:true}).waitFor();
+  const secondReady=app.waitForEvent('window');
+  await page.getByRole('button',{name:'New app window',exact:true}).click();
+  const second=await secondReady;
+  await second.getByRole('button',{name:'Open existing',exact:false}).click();
+  await second.locator('.session-name').filter({hasText:/^window-two$/}).click();
+  await second.getByLabel('Left panel',{exact:true}).waitFor();
+  await workspace.waitForFunction(()=>sessionStorage.getItem('gtmux-last-active-session')==='window-one');
+  await second.waitForFunction(()=>sessionStorage.getItem('gtmux-last-active-session')==='window-two');
+  assert.equal(await workspace.evaluate(()=>sessionStorage.getItem('gtmux-last-active-session')),'window-one');
+  assert.equal(await second.evaluate(()=>sessionStorage.getItem('gtmux-last-active-session')),'window-two');
+  const secondWindow=await app.browserWindow(second);
+  await secondWindow.evaluate(window=>window.close());
+  await workspace.getByLabel('Left panel',{exact:true}).waitFor();
+  assert.equal(await page.locator('#state').textContent(),'running');
+
   await page.getByRole('button', { name: 'Stop server…', exact: true }).click();
   await page.locator('#confirm-stop').click();
   await page.locator('#state').filter({ hasText: /^stopped$/ }).waitFor({ timeout: 30000 });
   // Reopening after a server stop must reload the existing window with the new token.
   await page.getByRole('button', { name: 'Open workspace', exact: true }).click();
   await page.locator('#state').filter({hasText:/^running$/}).waitFor({timeout:30000});
-  await workspace.getByRole('button',{name:'Open existing',exact:false}).waitFor();
+  await workspace.getByLabel('Left panel',{exact:true}).waitFor();
   await page.waitForFunction(()=>document.querySelector('#message').textContent==='Workspace opened.');
   await page.getByRole('button', {name:'Stop server…',exact:true}).click();
   await page.locator('#confirm-stop').click();
   await page.locator('#state').filter({hasText:/^stopped$/}).waitFor({timeout:30000});
-  // Close the manager first while the workspace remains open: this reproduced the
-  // destroyed-manager callback during application shutdown.
+  // Closing controls must not end another window. Explicit app quit still exits all.
   const child = app.process();
   const processExit = new Promise(resolve => child.once('exit', (code, signal) => resolve({ code, signal })));
   const managerId = await (await app.browserWindow(page)).evaluate(window => window.id);
+  await app.evaluate(({ BrowserWindow }, id) => { BrowserWindow.fromId(id).close(); }, managerId);
+  assert.equal(await app.evaluate(({BrowserWindow},id)=>BrowserWindow.fromId(id).isVisible(),managerId),false);
+  assert.equal(workspace.isClosed(),false);
   const exited = app.waitForEvent('close', { timeout: 30000 });
-  await app.evaluate(({ BrowserWindow }, id) => { setImmediate(() => BrowserWindow.fromId(id).close()); }, managerId);
+  await app.evaluate(({app})=>{setImmediate(()=>app.quit());});
   await exited;
   app = null;
   assert.deepEqual(await processExit, { code: 0, signal: null });

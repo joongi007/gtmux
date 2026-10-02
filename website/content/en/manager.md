@@ -39,3 +39,5 @@ Setup buttons use a subtle hover tint; primary actions and the selected navigati
 Beside **Save setup**, **Unsaved changes**, **Saving settings…**, and **✓ Saved** distinguish editing, saving, and persisted settings. A failed save shows **Not saved** with the reason and keeps your draft for retry.
 
 **Open workspace** starts the configured server if needed, waits until it is ready, and opens the selected app/browser view. Use it again after stopping the server. **Start server** only runs the server. Opening from the desktop tray follows the same start-and-open flow. Progress and opening failures appear beside the server controls.
+
+In the desktop app, **New app window** opens another independent workspace window. Each window can attach to a different session, like browser tabs. You can also use the tray menu or **Ctrl+N** on Windows/Linux (**⌘N** on macOS). Closing a workspace window leaves other windows and the server running. **Open workspace** focuses an existing window without reloading it; after a server restart, it authenticates again. Closing server controls hides them while workspace windows remain open.

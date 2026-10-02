@@ -20,7 +20,8 @@ function harness() {
     show() { if (this.destroyed) throw new Error('Object has been destroyed'); this.shows++; }
     focus() { if (this.destroyed) throw new Error('Object has been destroyed'); }
     isMinimized() { return false; }
-    async loadURL() {}
+    loads = 0;
+    async loadURL() { this.loads++; }
     close() { this.destroyed = true; this.emit('closed'); }
   }
   const context = vm.createContext({ __dirname: fileURLToPath(new URL('../src/', import.meta.url)), require: name => name === 'electron' ? { app, BrowserWindow: Window } : require(name), process: { env: {} }, URL });
@@ -43,4 +44,15 @@ test('ordinary workspace close reveals controls, but shutdown never does', async
     h.workspace().close();
     assert.equal(manager.shows, state === 'normal' ? 1 : 0);
   }
+});
+
+test('new windows coexist and focusing an existing window preserves its session', async () => {
+  const h = harness(), manager = new h.Window(); h.setManager(manager);
+  await h.openWorkspace('http://localhost:1234/?token=a','app'); const first=h.workspace();
+  await h.openWorkspace('http://localhost:1234/?token=a','app',{newWindow:true}); const second=h.workspace();
+  assert.notEqual(first,second); assert.equal(first.destroyed,false);
+  await h.openWorkspace('http://localhost:1234/?token=a','app'); assert.equal(second.loads,1);
+  second.close(); assert.equal(first.destroyed,false); assert.equal(manager.shows,0);
+  await h.openWorkspace('http://localhost:1234/?token=b','app'); assert.equal(h.workspace(),first); assert.equal(first.loads,2);
+  first.close(); assert.equal(manager.shows,1);
 });
