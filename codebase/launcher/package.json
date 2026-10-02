@@ -74,7 +74,11 @@
     },
     "nsis": {
       "oneClick": false,
-      "allowToChangeInstallationDirectory": true
+      "allowToChangeInstallationDirectory": true,
+      "createStartMenuShortcut": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "gtmux",
+      "deleteAppDataOnUninstall": false
     },
     "publish": null,
     "icon": "ui/icon.png"
