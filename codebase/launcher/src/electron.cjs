@@ -33,7 +33,7 @@ async function boot() {
     installFailed: () => { quitting = false; quitPending = false; if (supervisor.preferences?.background) createTray(); showManager(); },
     stopForInstall: async credential => { if (quitPending || quitting) throw new Error('Application is already shutting down.'); quitPending = true; try { await supervisor.stop(credential); await proxy.stop(); quitting = true; updates.close(); tray?.destroy(); tray = null; } catch (e) { quitPending = false; throw e; } } });
   await updates.load(); updates.startSchedule();
-  control = await controlServer({ supervisor, proxy, updates, designTokens: app.isPackaged ? path.join(process.resourcesPath, 'design-tokens.css') : undefined, platform: adapter?.label ?? process.platform,
+  control = await controlServer({ supervisor, proxy, updates, settingsControls: app.isPackaged ? path.join(process.resourcesPath, 'settings-controls.css') : undefined, designTokens: app.isPackaged ? path.join(process.resourcesPath, 'design-tokens.css') : undefined, platform: adapter?.label ?? process.platform,
     onOpen: openWorkspace, onPreferences: async preferences => {
       if (preferences.background && !tray) createTray();
       if (!preferences.background && tray) { tray.destroy(); tray = null; }

@@ -43,6 +43,10 @@
       {
         "from": "../frontend/src/styles/tokens.css",
         "to": "design-tokens.css"
+      },
+      {
+        "from": "../frontend/src/styles/settings-controls.css",
+        "to": "settings-controls.css"
       }
     ],
     "directories": {

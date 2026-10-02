@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 const ui = new URL('../ui/', import.meta.url);
 const assets = { '/': ['index.html', 'text/html'], '/app.js': ['app.js', 'text/javascript'], '/style.css': ['style.css', 'text/css'] };
 const equal = (a, b) => typeof a === 'string' && a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
-export async function controlServer({ supervisor, proxy, platform = process.platform, onOpen, onPreferences, updates, designTokens = new URL('../../frontend/src/styles/tokens.css', import.meta.url) }) {
+export async function controlServer({ supervisor, proxy, platform = process.platform, onOpen, onPreferences, updates, designTokens = new URL('../../frontend/src/styles/tokens.css', import.meta.url), settingsControls = new URL('../../frontend/src/styles/settings-controls.css', import.meta.url) }) {
   const integrations = new AgentInstall(supervisor);
   let operation = Promise.resolve();
   const secret = randomBytes(32).toString('hex'); let origin, cookieName;
@@ -25,6 +25,7 @@ export async function controlServer({ supervisor, proxy, platform = process.plat
       }
       const cookie = req.headers.cookie?.split(';').map(s => s.trim()).find(s => s.startsWith(`${cookieName}=`))?.slice(cookieName.length + 1);
       if (!equal(cookie, secret)) return reply(401, { error: 'Open the management URL printed when the launcher starts.' });
+      if (req.method === 'GET' && url.pathname === '/settings-controls.css') { res.writeHead(200, { 'Content-Type': 'text/css' }); return res.end(await readFile(settingsControls)); }
       if (req.method === 'GET' && url.pathname === '/tokens.css') { res.writeHead(200, { 'Content-Type': 'text/css' }); return res.end(await readFile(designTokens)); }
       if (req.method === 'GET' && assets[url.pathname]) {
         const [path, type] = assets[url.pathname]; res.writeHead(200, { 'Content-Type': type }); return res.end(await readFile(new URL(path, ui)));

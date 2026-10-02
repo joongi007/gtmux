@@ -22,6 +22,18 @@ try {
   const page = await browser.newPage({ viewport: { width: 1100, height: 900 } });
   const errors = []; page.on('pageerror', error => errors.push(error.message));
   await page.goto(control.url);
+  await page.waitForFunction(() => document.querySelector('#platform').textContent !== '');
+  assert.equal(await page.locator('#server h1').evaluate(el => getComputedStyle(el).fontSize),'16px');
+  assert.equal(await page.locator('#setup [name="port"]').evaluate(el => getComputedStyle(el).height),'32px');
+  const toggle=page.locator('#setup [role="switch"]');
+  assert.deepEqual(await toggle.evaluate(el=>({width:getComputedStyle(el).width,height:getComputedStyle(el).height})),{width:'28px',height:'16px'});
+  if(process.env.GTMUX_SCREENSHOTS) {
+    await mkdir(process.env.GTMUX_SCREENSHOTS,{recursive:true});
+    for(const theme of ['dark','light']) {
+      await page.locator('[name="theme"]').selectOption(theme);
+      await page.screenshot({path:join(process.env.GTMUX_SCREENSHOTS,`first-setup-${theme}.png`),fullPage:true,animations:'disabled'});
+    }
+  }
   await page.locator('[name="workspace"]').fill(root);
   await page.locator('[name="port"]').fill(String(port));
   await page.getByRole('button', { name: 'Save setup', exact: true }).click();
