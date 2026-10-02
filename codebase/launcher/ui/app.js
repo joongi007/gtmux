@@ -14,6 +14,9 @@ async function refresh() {
   }
   $('setup').elements.port.disabled = status.configured;
   $('setup').elements.workspace.disabled = status.configured;
+  $('workspace-browse').hidden = !status.workspacePicker;
+  $('workspace-browse').disabled = busy || status.configured;
+  $('workspace-help').textContent = status.workspacePicker ? 'The starting folder for your projects. Type a path or choose a folder.' : 'The starting folder for your projects. Enter an absolute folder path on the server.';
   $('config-hint').textContent = status.configured ? 'Change the server port or workspace in the workspace Settings → Server, then restart here. Your TOML edits are preserved.' : '';
   $('start').disabled = busy || !status.configured || Boolean(status.pid);
   $('open').disabled = busy || status.state !== 'running';
@@ -60,6 +63,12 @@ document.querySelectorAll('[data-section]').forEach(button => button.addEventLis
 }));
 $('setup').addEventListener('submit', event => { event.preventDefault(); const form = $('setup').elements;
   void action(() => request('configure', { mode: form.mode.value, port: Number(form.port.value), workspace: form.workspace.value, background: form.background.checked, theme: form.theme.value }), 'Setup saved.'); });
+$('workspace-browse').onclick = async () => { const selection = await action(async () => {
+  const field = $('setup').elements.workspace;
+  const result = await request('workspace/choose', {path: field.value});
+  if (!result.canceled && result.path) { field.value = result.path; field.dispatchEvent(new Event('input', {bubbles:true})); field.focus(); }
+  return result;
+}); if (selection) $('message').textContent = selection.canceled ? '' : 'Folder selected. Choose Save setup to keep it.'; };
 $('start').onclick = () => action(() => request('start', {}), 'Server started. Open your workspace when ready.');
 $('open').onclick = () => action(async () => { const result = await request('open', {}); if (result.url) window.open(result.url, '_blank', 'noopener,noreferrer'); }, 'Workspace opened.');
 for (const id of ['stop', 'restart', 'disable', 'update-install']) $(id).onclick = () => {

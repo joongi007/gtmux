@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 const ui = new URL('../ui/', import.meta.url);
 const assets = { '/': ['index.html', 'text/html'], '/app.js': ['app.js', 'text/javascript'], '/style.css': ['style.css', 'text/css'] };
 const equal = (a, b) => typeof a === 'string' && a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
-export async function controlServer({ supervisor, proxy, platform = process.platform, onOpen, onPreferences, updates, designTokens = new URL('../../frontend/src/styles/tokens.css', import.meta.url), settingsControls = new URL('../../frontend/src/styles/settings-controls.css', import.meta.url) }) {
+export async function controlServer({ supervisor, proxy, platform = process.platform, onOpen, onPreferences, onChooseWorkspace, updates, designTokens = new URL('../../frontend/src/styles/tokens.css', import.meta.url), settingsControls = new URL('../../frontend/src/styles/settings-controls.css', import.meta.url) }) {
   const integrations = new AgentInstall(supervisor);
   let operation = Promise.resolve();
   const secret = randomBytes(32).toString('hex'); let origin, cookieName;
@@ -30,7 +30,7 @@ export async function controlServer({ supervisor, proxy, platform = process.plat
       if (req.method === 'GET' && assets[url.pathname]) {
         const [path, type] = assets[url.pathname]; res.writeHead(200, { 'Content-Type': type }); return res.end(await readFile(new URL(path, ui)));
       }
-      if (req.method === 'GET' && url.pathname === '/api/status') return reply(200, { ...supervisor.status(), platform, proxy: await proxy.status(), updates: updates?.status() ?? { supported: false, automatic: false, phase: 'unavailable', error: 'App updates require an installed desktop package. Server archives can be replaced after stopping their server.' } });
+      if (req.method === 'GET' && url.pathname === '/api/status') return reply(200, { ...supervisor.status(), platform, workspacePicker: Boolean(onChooseWorkspace), proxy: await proxy.status(), updates: updates?.status() ?? { supported: false, automatic: false, phase: 'unavailable', error: 'App updates require an installed desktop package. Server archives can be replaced after stopping their server.' } });
       if (req.method !== 'POST' || req.headers.origin !== origin || !req.headers['content-type']?.startsWith('application/json'))
         return reply(403, { error: 'Management requests must originate from this local control page.' });
       let body = ''; for await (const chunk of req) { body += chunk; if (Buffer.byteLength(body) > 16384) throw new Error('Request too large.'); }
@@ -39,6 +39,10 @@ export async function controlServer({ supervisor, proxy, platform = process.plat
       await previous;
       try {
       switch (url.pathname) {
+        case '/api/workspace/choose':
+          if (!onChooseWorkspace) throw new Error('Folder selection is available in the desktop app. Enter the server folder path directly here.');
+          if (supervisor.status().configured) throw new Error('Change an existing workspace in Settings → Server.');
+          result = await onChooseWorkspace(data.path); break;
         case '/api/config/port': result = data.port === undefined ? await supervisor.savedPort() : await supervisor.changePort(data); break;
         case '/api/agent/preview': result = await integrations.preview(data.agent, data.remove === true); break;
         case '/api/agent/apply': result = await integrations.apply(data); break;

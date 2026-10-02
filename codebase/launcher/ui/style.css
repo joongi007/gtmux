@@ -70,3 +70,8 @@ summary { cursor: pointer; color: var(--color-fg-muted); }
   .columns { grid-template-columns: 1fr; gap: 0; }
 }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+
+.path-row .lbl { margin: 0; }
+.path-control { display: flex; align-items: center; gap: var(--space-8); min-width: 0; }
+.path-control input { flex: 1; }
+.path-control button { flex-shrink: 0; }

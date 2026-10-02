@@ -34,6 +34,14 @@ async function boot() {
     stopForInstall: async credential => { if (quitPending || quitting) throw new Error('Application is already shutting down.'); quitPending = true; try { await supervisor.stop(credential); await proxy.stop(); quitting = true; updates.close(); tray?.destroy(); tray = null; } catch (e) { quitPending = false; throw e; } } });
   await updates.load(); updates.startSchedule();
   control = await controlServer({ supervisor, proxy, updates, settingsControls: app.isPackaged ? path.join(process.resourcesPath, 'settings-controls.css') : undefined, designTokens: app.isPackaged ? path.join(process.resourcesPath, 'design-tokens.css') : undefined, platform: adapter?.label ?? process.platform,
+    onChooseWorkspace: async currentPath => {
+      if (quitting || quitPending || !managerWindow || managerWindow.isDestroyed()) throw new Error('The manager window is closing.');
+      const result = await dialog.showOpenDialog(managerWindow, {
+        title: 'Choose workspace folder', buttonLabel: 'Select folder', properties: ['openDirectory'],
+        defaultPath: typeof currentPath === 'string' && path.isAbsolute(currentPath) ? currentPath : app.getPath('documents'),
+      });
+      return { canceled: result.canceled, path: result.canceled ? null : result.filePaths[0] ?? null };
+    },
     onOpen: openWorkspace, onPreferences: async preferences => {
       if (preferences.background && !tray) createTray();
       if (!preferences.background && tray) { tray.destroy(); tray = null; }

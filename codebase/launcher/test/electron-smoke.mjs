@@ -18,6 +18,24 @@ try {
   assert.equal(await app.evaluate(({ app }) => app.getPath('userData')), root);
   await page.locator('#setup [name="mode"]').selectOption('app');
   await page.locator('[name="workspace"]').fill(root);
+  // Stub only the OS picker result in this isolated app; exercise the real UI,
+  // authenticated manager route and main-process dialog callback.
+  await app.evaluate(({dialog},root)=>{
+    globalThis.originalFolderDialog=dialog.showOpenDialog;
+    globalThis.folderDialogCalls=[];
+    dialog.showOpenDialog=async(_window,options)=>{
+      globalThis.folderDialogCalls.push(options);
+      return globalThis.folderDialogCalls.length===1?{canceled:true,filePaths:[]}:{canceled:false,filePaths:[root]};
+    };
+  },root);
+  await page.locator('#workspace-browse').click();
+  await page.waitForFunction(()=>!document.querySelector('#workspace-browse').disabled);
+  assert.equal(await page.locator('[name="workspace"]').inputValue(),root,'cancel retains the typed path');
+  await page.locator('[name="workspace"]').fill('');
+  await page.locator('#workspace-browse').click();
+  await page.waitForFunction(expected=>document.querySelector('[name="workspace"]').value===expected,root);
+  const calls=await app.evaluate(({dialog})=>{dialog.showOpenDialog=globalThis.originalFolderDialog;return globalThis.folderDialogCalls;});
+  assert.equal(calls.length,2);assert.deepEqual(calls[0].properties,['openDirectory']);assert.equal(calls[0].defaultPath,root);
   await page.locator('[name="port"]').fill(String(port));
   await page.getByRole('button', { name: 'Save setup', exact: true }).click();
   await page.getByRole('button', { name: 'Start server', exact: true }).click();
