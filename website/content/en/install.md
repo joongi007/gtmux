@@ -17,7 +17,7 @@ Install the package for your platform, open gtmux, select a workspace and an unu
 Choose Web, App, or Web + app. Background mode keeps the manager in the system tray while its window is hidden. This does not install a system service or automatically enable login startup. Quitting the app stops its server and running terminal programs.
 
 
-On Windows, use **gtmux Setup VERSION.exe** to install the desktop app. The installer registers gtmux in the Start menu and the installed-apps list and creates a desktop shortcut. An executable inside `win-unpacked` is a portable development preview and does not register these entries. Install a newer package over the existing installation to keep the same application identity and user profile. Uninstalling keeps the profile by default; do not delete it when upgrading. A local installer without an update feed supports manual upgrades, not automatic updates.
+On Windows, use **gtmux-Setup-VERSION-ARCH.exe** to install the desktop app. The installer registers gtmux in the Start menu and the installed-apps list and creates a desktop shortcut. An executable inside `win-unpacked` is a portable development preview and does not register these entries. Install a newer package over the existing installation to keep the same application identity and user profile. Uninstalling keeps the profile by default; do not delete it when upgrading. A local installer without an update feed supports manual upgrades, not automatic updates.
 
 ## Updating
 

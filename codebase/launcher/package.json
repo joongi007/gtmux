@@ -78,7 +78,8 @@
       "createStartMenuShortcut": true,
       "createDesktopShortcut": true,
       "shortcutName": "gtmux",
-      "deleteAppDataOnUninstall": false
+      "deleteAppDataOnUninstall": false,
+      "artifactName": "gtmux-Setup-${version}-${arch}.${ext}"
     },
     "publish": null,
     "icon": "ui/icon.png"
