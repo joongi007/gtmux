@@ -1660,11 +1660,13 @@
     align-items: center;
     justify-content: center;
     gap: 6px;
+    transition: background-color var(--motion-fast) var(--motion-easing),
+      border-color var(--motion-fast) var(--motion-easing);
   }
 
   .btn:hover:not(:disabled) {
-    background: var(--color-glass-2);
-    border-color: var(--color-fg-subtle);
+    background: color-mix(in srgb, var(--color-fg) 4%, var(--color-surface-2));
+    border-color: var(--color-border-strong);
   }
 
   .btn:disabled {
@@ -2113,5 +2115,8 @@
     .ctl {
       justify-self: start;
     }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .btn { transition: none; }
   }
 </style>

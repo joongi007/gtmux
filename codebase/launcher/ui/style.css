@@ -31,9 +31,12 @@ input, select { display: block; width: 100%; min-width: 0; height: 32px; padding
 label > input, label > select { margin-top: var(--space-6); }
 .srow > input, .srow > select, form > label > input, form > label > select { margin-top: 0; }
 input:hover:not(:disabled), select:hover:not(:disabled) { border-color: var(--color-fg-subtle); }
-button { display: inline-flex; align-items: center; justify-content: center; gap: var(--space-6); min-height: 32px; padding: var(--space-4) var(--space-12); border: 1px solid var(--color-border-strong); border-radius: var(--radius-md); background: var(--color-surface-2); color: var(--color-fg); font: var(--weight-medium) var(--text-base)/var(--leading-normal) var(--font-sans); cursor: pointer; }
-button:hover:not(:disabled) { background: var(--color-glass-2); border-color: var(--color-fg-subtle); }
+button { display: inline-flex; align-items: center; justify-content: center; gap: var(--space-6); min-height: 32px; padding: var(--space-4) var(--space-12); border: 1px solid var(--color-border-strong); border-radius: var(--radius-md); background: var(--color-surface-2); color: var(--color-fg); font: var(--weight-medium) var(--text-base)/var(--leading-normal) var(--font-sans); cursor: pointer; transition: background-color var(--motion-fast) var(--motion-easing), border-color var(--motion-fast) var(--motion-easing); }
+button:hover:not(:disabled) { background: color-mix(in srgb, var(--color-fg) 4%, var(--color-surface-2)); border-color: var(--color-border-strong); }
 button.primary { background: var(--color-accent); color: var(--color-accent-fg); border-color: transparent; }
+button.primary:hover:not(:disabled) { background: color-mix(in srgb, var(--color-accent) 90%, var(--color-fg)); border-color: transparent; }
+nav button:hover:not(:disabled) { background: var(--color-glass-1); }
+nav button[aria-current], nav button[aria-current]:hover:not(:disabled) { background: color-mix(in srgb, var(--color-accent) 12%, transparent); color: var(--color-accent); }
 button.danger { color: var(--color-danger); }
 button:disabled, input:disabled, select:disabled { opacity: .5; cursor: not-allowed; }
 :focus-visible { outline: 2px solid var(--color-info); outline-offset: 2px; }

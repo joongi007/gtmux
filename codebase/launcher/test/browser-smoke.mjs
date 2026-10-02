@@ -13,7 +13,7 @@ const root = await mkdtemp(join(tmpdir(), 'gtmux-browser-smoke-'));
 const supervisor = new Supervisor({ root, binary: process.env.GTMUX_TEST_BINARY,
   frontend: process.env.GTMUX_TEST_FRONTEND ?? resolve('../../.artifacts/frontend') });
 await supervisor.load(); const proxy = new ProxyManager(supervisor);
-const control = await controlServer({ supervisor, proxy });
+const control = await controlServer({ supervisor, proxy, onChooseWorkspace: async () => ({canceled:true,path:null}) });
 let browser;
 try {
   const probe = createServer(); await new Promise(r => probe.listen(0, '127.0.0.1', r));
@@ -32,6 +32,10 @@ try {
     for(const theme of ['dark','light']) {
       await page.locator('[name="theme"]').selectOption(theme);
       await page.screenshot({path:join(process.env.GTMUX_SCREENSHOTS,`first-setup-${theme}.png`),fullPage:true,animations:'disabled'});
+      await page.locator('#workspace-browse').hover();
+      await page.waitForTimeout(150);
+      await page.screenshot({path:join(process.env.GTMUX_SCREENSHOTS,`browse-hover-${theme}.png`),fullPage:true});
+      await page.mouse.move(0,0);
     }
   }
   await page.locator('[name="workspace"]').fill(root);

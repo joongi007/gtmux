@@ -33,3 +33,5 @@ When the server is stopped, expand **Change startup port or recover from a confl
 The manager uses the workspace design tokens and offers System, Light and Dark themes. Save setup to persist the theme. In the workspace, the resize handle also accepts arrow keys (10 px), Shift+arrow (50 px), Home and End. Activity-visible and hidden panel widths are stored separately and survive reload and toggles.
 
 In the desktop first-run screen, enter **Workspace folder** directly or use **Browse…** to open the operating system folder picker. Cancel keeps the typed path. Selecting a folder only updates the form; choose **Save setup** to apply it. The web-only manager accepts the server path as text because a browser cannot provide the server’s absolute filesystem path through a client-side folder upload picker.
+
+Setup buttons use a subtle hover tint; primary actions and the selected navigation item retain their accent color. Reduced-motion preferences disable button transitions.
