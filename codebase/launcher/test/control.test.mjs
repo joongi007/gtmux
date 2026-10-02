@@ -35,3 +35,19 @@ test('a rejected server stop preserves the public proxy and manager profiles use
     headers: { Cookie: cookie, Origin: first.origin, 'Content-Type': 'application/json' }, body: JSON.stringify({ confirmed: true, credential: 'wrong' }) });
   assert.equal(response.status, 400); assert.equal(stopped, 0);
 });
+
+test('open starts the stopped server and managed proxy before opening; startup failure never opens', async t => {
+  const calls=[]; let fail=false;
+  const control=await controlServer({
+    supervisor:{preferences:{mode:'app'},start:async()=>{calls.push('start');if(fail)throw new Error('Port is occupied');}},
+    proxy:{status:async()=>({configuration:{mode:'managed'}}),start:async()=>calls.push('proxy'),workspaceURL:async()=>{calls.push('url');return 'http://127.0.0.1:9999/';}},
+    onOpen:async(url,mode)=>{assert.equal(mode,'app');calls.push('open');}
+  });
+  t.after(()=>control.close());
+  assert.deepEqual(await control.openWorkspace(),{opened:true});
+  assert.deepEqual(calls,['start','proxy','url','open']);
+  calls.length=0; fail=true;
+  await assert.rejects(control.openWorkspace(),/occupied/); assert.deepEqual(calls,['start']);
+  calls.length=0; fail=false;
+  await control.openWorkspace(); assert.deepEqual(calls,['start','proxy','url','open']);
+});

@@ -39,7 +39,7 @@ async function refresh() {
   $('workspace-help').textContent = status.workspacePicker ? 'The starting folder for your projects. Type a path or choose a folder.' : 'The starting folder for your projects. Enter an absolute folder path on the server.';
   $('config-hint').textContent = status.configured ? (status.pid ? 'Stop the server to change its workspace folder.' : 'Change the workspace folder and choose Save setup. Reload reads the saved path from TOML. Existing sessions keep their folders.') : '';
   $('start').disabled = busy || !status.configured || Boolean(status.pid);
-  $('open').disabled = busy || status.state !== 'running';
+  $('open').disabled = busy || !status.configured || ['starting','stopping'].includes(status.state);
   $('stop').disabled = busy || !status.pid; $('restart').disabled = busy || !status.pid;
   $('proxy-status').textContent = `${status.proxy.installed ? 'Proxy installed' : 'Proxy not installed'} · ${status.proxy.running ? 'running' : 'stopped'}${status.proxy.configuration ? ' · ' + (status.proxy.configuration.origin || 'https://' + status.proxy.configuration.domain) : ''}`;
   $('https-enabled').checked = Boolean(status.proxy.configuration);
@@ -115,14 +115,31 @@ $('workspace-browse').onclick = async () => { const selection = await action(asy
   return result;
 }); if (selection) $('message').textContent = selection.canceled ? '' : 'Folder selected. Choose Save setup to keep it.'; };
 $('start').onclick = () => action(() => request('start', {}), 'Server started. Open your workspace when ready.');
-$('open').onclick = () => action(async () => { const result = await request('open', {}); if (result.url) window.open(result.url, '_blank', 'noopener,noreferrer'); }, 'Workspace opened.');
+$('open').onclick = () => {
+  if (busy) return;
+  // Reserve the browser tab during the click, before asynchronous startup.
+  const popup = status.desktopOpener ? null : window.open('about:blank', '_blank');
+  if (!status.desktopOpener && !popup) { $('open-status').textContent = 'Allow pop-ups for this manager, then try Open workspace again.'; return; }
+  if (popup) popup.opener = null;
+  return action(async () => {
+  $('open').textContent = status.state === 'running' ? 'Opening…' : 'Starting…';
+  $('open-status').textContent = status.state === 'running' ? 'Opening workspace…' : 'Starting the server, then opening workspace…';
+  try {
+    const result = await request('open', {});
+    if (result.url && popup) { if (popup.closed) throw new Error('The workspace tab was closed. Try Open workspace again.'); popup.location.replace(result.url); }
+    $('open-status').textContent = 'Workspace opened.';
+  } catch (error) {
+    popup?.close(); $('open-status').textContent = `Could not open workspace. ${error.message}`; throw error;
+  } finally { $('open').textContent = 'Open workspace'; }
+}, 'Workspace opened.');
+};
 for (const id of ['stop', 'restart', 'disable', 'update-install']) $(id).onclick = () => {
   pendingAction = id === 'disable' ? 'proxy/disable' : id === 'update-install' ? 'updates/install' : id; $('stop-confirm').hidden = false;
   // Keep confirmation in the visible section, including External access.
   $(id).parentElement.after($('stop-confirm')); $('credential').focus();
 };
 $('cancel-stop').onclick = () => { $('stop-confirm').hidden = true; $('credential').value = ''; };
-$('confirm-stop').onclick = () => action(async () => { const credential = $('credential').value; $('credential').value = ''; await request(pendingAction, { confirmed: true, credential }); $('stop-confirm').hidden = true; }, 'Server operation complete.');
+$('confirm-stop').onclick = () => action(async () => { const credential = $('credential').value; $('credential').value = ''; await request(pendingAction, { confirmed: true, credential }); $('stop-confirm').hidden = true; $('open-status').textContent = ''; }, 'Server operation complete.');
 $('https-enabled').onchange = () => {
   const enabled = Boolean(status.proxy.configuration);
   $('https-enabled').checked = enabled;

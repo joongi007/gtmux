@@ -65,6 +65,14 @@ try {
   await page.getByRole('button', { name: 'Stop server…', exact: true }).click();
   await page.locator('#confirm-stop').click();
   await page.locator('#state').filter({ hasText: /^stopped$/ }).waitFor({ timeout: 30000 });
+  // Reopening after a server stop must reload the existing window with the new token.
+  await page.getByRole('button', { name: 'Open workspace', exact: true }).click();
+  await page.locator('#state').filter({hasText:/^running$/}).waitFor({timeout:30000});
+  await workspace.getByRole('button',{name:'Open existing',exact:false}).waitFor();
+  await page.waitForFunction(()=>document.querySelector('#message').textContent==='Workspace opened.');
+  await page.getByRole('button', {name:'Stop server…',exact:true}).click();
+  await page.locator('#confirm-stop').click();
+  await page.locator('#state').filter({hasText:/^stopped$/}).waitFor({timeout:30000});
   // Close the manager first while the workspace remains open: this reproduced the
   // destroyed-manager callback during application shutdown.
   const child = app.process();

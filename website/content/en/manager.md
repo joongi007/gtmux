@@ -37,3 +37,5 @@ In the desktop first-run screen, enter **Workspace folder** directly or use **Br
 Setup buttons use a subtle hover tint; primary actions and the selected navigation item retain their accent color. Reduced-motion preferences disable button transitions.
 
 Beside **Save setup**, **Unsaved changes**, **Saving settings…**, and **✓ Saved** distinguish editing, saving, and persisted settings. A failed save shows **Not saved** with the reason and keeps your draft for retry.
+
+**Open workspace** starts the configured server if needed, waits until it is ready, and opens the selected app/browser view. Use it again after stopping the server. **Start server** only runs the server. Opening from the desktop tray follows the same start-and-open flow. Progress and opening failures appear beside the server controls.

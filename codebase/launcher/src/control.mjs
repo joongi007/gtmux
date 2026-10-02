@@ -10,6 +10,14 @@ const equal = (a, b) => typeof a === 'string' && a.length === b.length && timing
 export async function controlServer({ supervisor, proxy, platform = process.platform, onOpen, onPreferences, onChooseWorkspace, updates, designTokens = new URL('../../frontend/src/styles/tokens.css', import.meta.url), settingsControls = new URL('../../frontend/src/styles/settings-controls.css', import.meta.url) }) {
   const integrations = new AgentInstall(supervisor);
   let operation = Promise.resolve();
+  async function openWorkspace() {
+    await supervisor.start();
+    if ((await proxy.status()).configuration?.mode === 'managed') await proxy.start();
+    const url = proxy.workspaceURL ? await proxy.workspaceURL() : supervisor.openURL();
+    if (onOpen) { await onOpen(url, supervisor.preferences.mode); return { opened: true }; }
+    return { url };
+  }
+
   const secret = randomBytes(32).toString('hex'); let origin, cookieName;
   const server = createServer(async (req, res) => {
     res.setHeader('Cache-Control', 'no-store'); res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -30,7 +38,7 @@ export async function controlServer({ supervisor, proxy, platform = process.plat
       if (req.method === 'GET' && assets[url.pathname]) {
         const [path, type] = assets[url.pathname]; res.writeHead(200, { 'Content-Type': type }); return res.end(await readFile(new URL(path, ui)));
       }
-      if (req.method === 'GET' && url.pathname === '/api/status') return reply(200, { ...supervisor.status(), platform, workspacePicker: Boolean(onChooseWorkspace), proxy: await proxy.status(), updates: updates?.status() ?? { supported: false, automatic: false, phase: 'unavailable', error: 'App updates require an installed desktop package. Server archives can be replaced after stopping their server.' } });
+      if (req.method === 'GET' && url.pathname === '/api/status') return reply(200, { ...supervisor.status(), platform, workspacePicker: Boolean(onChooseWorkspace), desktopOpener: Boolean(onOpen), proxy: await proxy.status(), updates: updates?.status() ?? { supported: false, automatic: false, phase: 'unavailable', error: 'App updates require an installed desktop package. Server archives can be replaced after stopping their server.' } });
       if (req.method !== 'POST' || req.headers.origin !== origin || !req.headers['content-type']?.startsWith('application/json'))
         return reply(403, { error: 'Management requests must originate from this local control page.' });
       let body = ''; for await (const chunk of req) { body += chunk; if (Buffer.byteLength(body) > 16384) throw new Error('Request too large.'); }
@@ -63,10 +71,7 @@ export async function controlServer({ supervisor, proxy, platform = process.plat
           if (!data.confirmed) throw new Error('Confirm that running terminal programs will end.');
           await supervisor.stop(data.credential); await proxy.stop(); result = await supervisor.start();
           if ((await proxy.status()).configuration?.mode === 'managed') await proxy.start(); break;
-        case '/api/open': {
-          const url = proxy.workspaceURL ? await proxy.workspaceURL() : supervisor.openURL();
-          if (onOpen) { await onOpen(url, supervisor.preferences.mode); result = { opened: true }; } else result = { url }; break;
-        }
+        case '/api/open': result = await openWorkspace(); break;
         case '/api/proxy/install': result = await proxy.install(); break;
         case '/api/proxy/preview': result = await proxy.preview(data); break;
         case '/api/proxy/apply': result = await proxy.apply(data); break;
@@ -84,5 +89,7 @@ export async function controlServer({ supervisor, proxy, platform = process.plat
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
   origin = `http://127.0.0.1:${server.address().port}`;
   cookieName = `gtmux_manager_${server.address().port}`;
-  return { server, origin, url: `${origin}/?token=${secret}`, close: () => new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve())) };
+  return { server, origin, openWorkspace: () => {
+    const pending = operation.then(openWorkspace); operation = pending.catch(() => {}); return pending;
+  }, url: `${origin}/?token=${secret}`, close: () => new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve())) };
 }

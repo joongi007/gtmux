@@ -19,6 +19,7 @@ function harness() {
     isDestroyed() { return this.destroyed; }
     show() { if (this.destroyed) throw new Error('Object has been destroyed'); this.shows++; }
     focus() { if (this.destroyed) throw new Error('Object has been destroyed'); }
+    isMinimized() { return false; }
     async loadURL() {}
     close() { this.destroyed = true; this.emit('closed'); }
   }

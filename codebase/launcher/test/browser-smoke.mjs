@@ -121,6 +121,15 @@ try {
   await page.getByRole('button', { name: 'Stop server…', exact: true }).click();
   await page.locator('#confirm-stop').click();
   await page.locator('#state').filter({ hasText: /^stopped$/ }).waitFor({ timeout: 30000 });
+  const popupReady = page.waitForEvent('popup');
+  await page.locator('#open').click();
+  const popup = await popupReady;
+  await page.locator('#state').filter({hasText:/^running$/}).waitFor({timeout:30000});
+  await popup.waitForURL(url=>url.origin===new URL(supervisor.openURL()).origin);
+  await popup.close();
+  await page.getByRole('button',{name:'Stop server…',exact:true}).click();
+  await page.locator('#confirm-stop').click();
+  await page.locator('#state').filter({hasText:/^stopped$/}).waitFor({timeout:30000});
   console.log('Browser setup, native server start, session creation, restart, proxy preview, layout and stop passed.');
 } finally {
   await browser?.close(); await proxy.stop(); await supervisor.stop(); await control.close();

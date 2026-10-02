@@ -83,7 +83,7 @@ async function openWorkspace(url, mode) {
     }
     const workspace = workspaceWindow;
     await workspace.loadURL(url);
-    if (!quitting && !quitPending && !workspace.isDestroyed()) workspace.show();
+    if (!quitting && !quitPending && !workspace.isDestroyed()) { if (workspace.isMinimized()) workspace.restore(); workspace.show(); workspace.focus(); }
   }
 }
 function createTray() {
@@ -93,7 +93,7 @@ function createTray() {
   tray = new Tray(icon); tray.setToolTip('gtmux server manager');
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: 'Show server controls', click: showManager },
-    { label: 'Open workspace', click: () => (async () => { await openWorkspace(await proxy.workspaceURL(), supervisor.preferences.mode); })().catch(e => dialog.showErrorBox('gtmux', e.message)) },
+    { label: 'Open workspace', click: () => (async () => { await control.openWorkspace(); })().catch(e => dialog.showErrorBox('gtmux', e.message)) },
     { type: 'separator' }, { label: 'Quit and stop server', click: () => app.quit() }
   ]));
   tray.on('click', showManager);
