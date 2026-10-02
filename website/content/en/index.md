@@ -17,4 +17,8 @@ Activity distinguishes observed output and reported agent state. Output becoming
 
 ## Preview status
 
-Linux local tests cover the server and manager. Windows builds use a native ConPTY server; WSL is not required. macOS and Windows installers are built by the release workflow and require platform testing before a production release. Download availability depends on the repository publishing a release. Unsigned packages can trigger OS trust prompts.
+Linux local tests cover the server and manager. Windows builds use a native ConPTY server; WSL is not required. Windows installer upgrade and relaunch have also been tested with an isolated local feed. The release workflow builds platform packages; macOS and ARM runtime validation, signing and public release delivery remain release checks. Download availability depends on the repository publishing a release. Unsigned packages can trigger OS trust prompts.
+
+## Project homepage
+
+The site root is the English project homepage; the header brand returns to the homepage in the current language. Documentation remains under `/en/` and `/ko/`. Screenshots show an isolated demo workspace with synthetic agent hook events, not private user sessions or live agent runs.

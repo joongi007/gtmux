@@ -1,4 +1,5 @@
 import { marked } from 'marked';
+import { home } from './home.mjs';
 import { readdir, readFile, mkdir, writeFile, cp, rm } from 'node:fs/promises';
 import { resolve } from 'node:path';
 const base = process.env.SITE_BASE ?? '/';
@@ -31,13 +32,15 @@ for (const lang of ['en', 'ko']) {
     const nav = pages.map(p => `<a href="${base}${lang}/${p.slug}.html"${page.slug === p.slug ? ' aria-current="page"' : ''}>${escape(p.title)}</a>`).join('');
     const other = lang === 'en' ? 'ko' : 'en';
     const shell = `<!doctype html><html lang="${lang}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="light dark"><title>${escape(page.title)} · gtmux</title><link rel="stylesheet" href="${base}assets/site.css"></head><body>
-<header><a class="brand" href="${base}${lang}/index.html">gtmux <span>documentation</span></a><label class="search-label"><span class="sr-only">${lang === 'ko' ? '문서 검색' : 'Search documentation'}</span><input id="search" type="search" placeholder="${lang === 'ko' ? '문서 검색' : 'Search documentation'}" autocomplete="off"></label><a href="${base}${other}/${page.slug}.html" lang="${other}">${other === 'ko' ? '한국어' : 'English'}</a></header>
+<header><a class="brand" href="${base}${lang}/home.html">gtmux <span>documentation</span></a><label class="search-label"><span class="sr-only">${lang === 'ko' ? '문서 검색' : 'Search documentation'}</span><input id="search" type="search" placeholder="${lang === 'ko' ? '문서 검색' : 'Search documentation'}" autocomplete="off"></label><a href="${base}${other}/${page.slug}.html" lang="${other}">${other === 'ko' ? '한국어' : 'English'}</a></header>
 <div class="layout"><nav aria-label="${lang === 'ko' ? '문서 목록' : 'Documentation'}">${nav}</nav><main id="main"><div id="search-results" hidden></div><article>${html}</article><footer>${lang === 'ko' ? '이 문서는 해당 소스 버전의 기능을 설명합니다.' : 'This documentation describes the features in this source version.'}</footer></main><aside aria-label="On this page">${headings.filter(h => h.depth === 2).map(h => `<a href="#${h.id}">${escape(h.text)}</a>`).join('')}</aside></div><script src="${base}assets/site.js" type="module" data-base="${base}" data-language="${lang}"></script></body></html>`;
     await mkdir(new URL(`${lang}/`, dist), { recursive: true }); await writeFile(new URL(`${lang}/${page.slug}.html`, dist), shell);
-    if (lang === 'en' && page.slug === 'index') await writeFile(new URL('index.html', dist), shell);
+
     indexes[lang].push({ title: page.title, url: `${base}${lang}/${page.slug}.html`, text: page.text.replace(/[#*`]/g, '').slice(0, 50000) });
   }
   await writeFile(new URL(`assets/search-${lang}.json`, dist), JSON.stringify(indexes[lang]));
 }
+for (const lang of ['en', 'ko']) await writeFile(new URL(`${lang}/home.html`, dist), home(lang, base));
+await writeFile(new URL('index.html', dist), home('en', base));
 await writeFile(new URL('.nojekyll', dist), '');
 console.log(`Built ${Object.values(indexes).reduce((n, p) => n + p.length, 0)} documentation pages at ${base}`);
