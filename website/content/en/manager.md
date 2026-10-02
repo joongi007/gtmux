@@ -35,3 +35,5 @@ The manager uses the workspace design tokens and offers System, Light and Dark t
 In the desktop first-run screen, enter **Workspace folder** directly or use **Browse…** to open the operating system folder picker. Cancel keeps the typed path. Selecting a folder only updates the form; choose **Save setup** to apply it. The web-only manager accepts the server path as text because a browser cannot provide the server’s absolute filesystem path through a client-side folder upload picker.
 
 Setup buttons use a subtle hover tint; primary actions and the selected navigation item retain their accent color. Reduced-motion preferences disable button transitions.
+
+Beside **Save setup**, **Unsaved changes**, **Saving settings…**, and **✓ Saved** distinguish editing, saving, and persisted settings. A failed save shows **Not saved** with the reason and keeps your draft for retry.

@@ -40,7 +40,26 @@ try {
   }
   await page.locator('[name="workspace"]').fill(root);
   await page.locator('[name="port"]').fill(String(port));
+  assert.equal(await page.locator('#setup-status').textContent(),'Unsaved changes');
+  // Hold then reject a save to verify visible progress, retry and draft retention.
+  let releaseSave;
+  const saveGate = new Promise(resolve => releaseSave = resolve);
+  await page.route('**/api/configure',async route => {
+    await saveGate;
+    await route.fulfill({status:500,contentType:'application/json',body:JSON.stringify({error:'Test write failure'})});
+  });
+  await page.locator('#setup-save').click();
+  await page.locator('#setup-status[data-state="saving"]').waitFor();
+  assert.equal(await page.locator('#setup-save').textContent(),'Saving…');
+  assert(await page.locator('[name="workspace"]').isDisabled());
+  releaseSave();
+  await page.locator('#setup-status[data-state="error"]').waitFor();
+  await page.waitForFunction(()=>!document.querySelector('#setup-save').disabled);
+  assert.match(await page.locator('#setup-status').textContent(),/Not saved.*Test write failure/);
+  assert.equal(await page.locator('[name="workspace"]').inputValue(),root);
+  await page.unroute('**/api/configure');
   await page.getByRole('button', { name: 'Save setup', exact: true }).click();
+  await page.locator('#setup-status[data-state="saved"]').waitFor();
   await page.getByRole('button', { name: 'Start server', exact: true }).click();
   await page.locator('#state').filter({ hasText: /^running$/ }).waitFor({ timeout: 30000 });
   assert.equal(await page.locator('[role="switch"]').count(), 3);

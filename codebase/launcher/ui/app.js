@@ -1,5 +1,19 @@
 const $ = id => document.getElementById(id);
 let status, plan, pendingAction, busy = false, populated = false, proxyPopulated = false, portRevision = null, workspaceRevision = null, agentPlan = null;
+let savedSetup = null, savingSetup = false;
+function setupSnapshot() {
+  const fields = $('setup').elements;
+  return JSON.stringify([fields.mode.value,fields.port.value,fields.workspace.value,fields.background.checked,fields.theme.value]);
+}
+function setupStatus(state, text) {
+  $('setup-status').dataset.state = state;
+  $('setup-status').textContent = text;
+}
+function setupEdited() {
+  if (savingSetup) return;
+  const dirty = setupSnapshot() !== savedSetup;
+  setupStatus(dirty ? 'dirty' : 'saved', dirty ? 'Unsaved changes' : '✓ Saved');
+}
 async function request(path, data) {
   const response = await fetch(`/api/${path}`, data === undefined ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
   const result = await response.json(); if (!response.ok) throw new Error(result.error || `Request failed (${response.status})`); return result;
@@ -14,7 +28,7 @@ async function refresh() {
       const saved = await request('config/workspace', {});
       $('setup').elements.workspace.value = saved.workspace; workspaceRevision = saved.revision;
     }
-    populated = true;
+    populated = true; savedSetup = setupSnapshot(); setupStatus('saved', '✓ Saved');
   }
   $('setup').elements.port.disabled = status.configured;
   $('setup').elements.workspace.disabled = busy || Boolean(status.pid);
@@ -67,9 +81,33 @@ document.querySelectorAll('[data-section]').forEach(button => button.addEventLis
   for (const item of document.querySelectorAll('[data-section]')) { if (item === button) item.setAttribute('aria-current', 'page'); else item.removeAttribute('aria-current'); }
   for (const id of ['server', 'exposure', 'agents', 'updates']) $(id).hidden = id !== button.dataset.section;
 }));
-$('setup').addEventListener('submit', event => { event.preventDefault(); const form = $('setup').elements;
-  void action(async () => { await request('configure', { mode: form.mode.value, port: Number(form.port.value), workspace: form.workspace.value, background: form.background.checked, theme: form.theme.value, revision: workspaceRevision }); populated = false; }, 'Setup saved.'); });
-$('workspace-reload').onclick = () => action(async () => { const saved = await request('config/workspace', {}); $('setup').elements.workspace.value = saved.workspace; workspaceRevision = saved.revision; }, 'Workspace reloaded.');
+$('setup').addEventListener('input', setupEdited);
+$('setup').addEventListener('change', setupEdited);
+$('theme').addEventListener('change', setupEdited);
+$('setup').addEventListener('submit', event => {
+  event.preventDefault(); if (busy || savingSetup) return;
+  const form = $('setup').elements;
+  const values = {mode:form.mode.value,port:Number(form.port.value),workspace:form.workspace.value,background:form.background.checked,theme:form.theme.value,revision:workspaceRevision};
+  void action(async () => {
+    savingSetup = true; $('setup').setAttribute('aria-busy','true');
+    $('setup-save').textContent = 'Saving…'; setupStatus('saving','Saving settings…');
+    const controls = [...form].filter(field => field.matches('input, select'));
+    const disabled = controls.map(field => field.disabled);
+    controls.forEach(field => field.disabled = true);
+    try {
+      await request('configure', values);
+      savedSetup = setupSnapshot(); populated = false;
+      setupStatus('saved','✓ Saved');
+    } catch (error) {
+      setupStatus('error',`Not saved. ${error.message}`); throw error;
+    } finally {
+      savingSetup = false; $('setup').removeAttribute('aria-busy');
+      $('setup-save').textContent = 'Save setup';
+      controls.forEach((field,index) => field.disabled = disabled[index]);
+    }
+  }, 'Setup saved.');
+});
+$('workspace-reload').onclick = () => action(async () => { const saved = await request('config/workspace', {}); $('setup').elements.workspace.value = saved.workspace; workspaceRevision = saved.revision; setupEdited(); }, 'Workspace reloaded.');
 $('workspace-browse').onclick = async () => { const selection = await action(async () => {
   const field = $('setup').elements.workspace;
   const result = await request('workspace/choose', {path: field.value});

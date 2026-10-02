@@ -83,3 +83,9 @@ select { cursor: pointer; transition: background-color var(--motion-fast) var(--
 select:hover:not(:disabled) { background-color: color-mix(in srgb, var(--color-fg) 3%, var(--color-surface)); }
 select:focus-visible { border-color: var(--color-info); }
 @media (prefers-reduced-motion: reduce) { select { transition: none; } }
+
+#setup .actions { align-items: center; }
+#setup-status { font-size: var(--text-base); color: var(--color-fg-muted); overflow-wrap: anywhere; }
+#setup-status[data-state="saved"] { color: var(--color-fg-muted); }
+#setup-status[data-state="error"] { color: var(--color-danger); }
+#setup-save { min-width: 88px; }
