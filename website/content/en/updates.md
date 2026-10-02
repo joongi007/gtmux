@@ -10,6 +10,17 @@ Build with `GTMUX_RELEASE_REPOSITORY=owner/repo` to include the GitHub update fe
 
 Windows NSIS, macOS applications and Linux AppImage are the update targets. macOS distribution requires appropriate signing/notarization for reliable installation and updates. Unpacked builds, web-only managers, Linux archives and local packages without a configured feed show why automatic updates are unavailable. Stop an archive installation's server before replacing its binary and frontend together. Do not delete its configuration or Store.
 
-A loopback feed test exercises the actual updater SDK's metadata lookup, download and SHA512 rejection. Tests do not install an update, and no public release has been published as part of this work. macOS/ARM runner results and end-to-end signed release updates remain release acceptance checks.
+A loopback feed test exercises the actual updater SDK's metadata lookup, download and SHA512 rejection. That checksum test does not install an update. A separate opt-in Windows test has verified real NSIS installation from 0.1.0 to 0.1.1, server shutdown, automatic relaunch, and preservation of TOML and a Store marker, using a separate test-app identity and loopback feed. No public release was needed. macOS/ARM runner results and end-to-end signed release updates remain release acceptance checks.
 
 Installing the Windows desktop app and registering Start-menu shortcuts does not require GitHub Releases. Automatic updates do require a configured feed with a published newer version. A feed-configured preview can be installed before the first release, but checking for updates may fail until that release exists. Stable update builds keep the same application ID and publish a higher version with its installer, `latest.yml`, and blockmap to the same trusted repository; a git push alone does not publish an update.
+
+## Reproduce the Windows installation test
+
+Use Windows Node and an interactive Windows desktop. Stage the native Windows server, its runtime DLLs and frontend in the launcher `resources` directory first, or set `GTMUX_TEST_SERVER_RESOURCES` to that directory. From `codebase/launcher`, run:
+
+```powershell
+node test/build-windows-update-fixtures.mjs
+node test/windows-update-install-smoke.mjs
+```
+
+The fixture builder creates unsigned versions 0.1.0 and 0.1.1 under a separate app ID. The test installs **gtmux Update Test**, serves updates on loopback port 39241, operates only that installer's wizard, verifies the new executable version and preserved configuration, then uninstalls the test app. It refuses an existing test profile/cache. This verifies the local Windows installation pipeline, not GitHub hosting or signed release distribution.
